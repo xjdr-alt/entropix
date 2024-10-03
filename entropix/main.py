@@ -221,7 +221,7 @@ def main():
   xfmr_weights = load_weights()
   #xfmr_weights = load_weights(ckpt_dir=Path('weights/1B-Base'))
 
-  tokenizer = Tokenizer('atlas/tokenizer.model')
+  tokenizer = Tokenizer('entropix/tokenizer.model')
   raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False)
   raw_tokens2 = tokenizer.encode(prompt2, bos=False, eos=False)
   raw_tokens3 = tokenizer.encode(prompt3, bos=False, eos=False)
@@ -251,6 +251,8 @@ def main():
     while cur_pos < 2048:
       cur_pos += 1
       logits, kvcache = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache)
+      # TODO(xjdr): Add gen_tokens back when we add DRY and Entropy Sampler
+      #next_token = sample(gen_tokens, logits)
       next_token = sample(gen_tokens, logits)
       gen_tokens = jnp.concatenate((gen_tokens, next_token))
       #print(f'{gen_tokens.shape=}')
