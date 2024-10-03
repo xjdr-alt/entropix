@@ -209,7 +209,7 @@ def main():
     cxfmr = torch.compile(xfmr)
     #xfmr_weights = load_weights(ckpt_dir=Path('weights/1B-Base'))
 
-    tokenizer = Tokenizer('atlas/tokenizer.model')
+    tokenizer = Tokenizer('entropix/tokenizer.model')
     raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False)
     raw_tokens2 = tokenizer.encode(prompt2, bos=False, eos=False)
     raw_tokens3 = tokenizer.encode(prompt3, bos=False, eos=False)
@@ -240,8 +240,9 @@ def main():
         cur_pos += 1
         logits, kvcache = cxfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache)
         gen_tokens = torch.cat((gen_tokens, next_token), dim=1)
-        #next_token = torch.argmax(logits[:, -1], dim=-1, keepdim=True).to(torch.long)
-        next_token = sample(gen_tokens, logits)
+        # TODO(xjdr): We need to add gen tokens back when we add DRY and Entropy Samplers back
+        #next_token = sample(gen_tokens, logits)
+        next_token = sample(logits)
         print(tokenizer.decode(next_token.tolist()[0]), end='', flush=True)
         if torch.isin(next_token, stop).any():
           break
