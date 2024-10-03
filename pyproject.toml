@@ -1,0 +1,64 @@
+[tool.poetry]
+name = "entropix"
+version = "0.1.0"
+description = ""
+authors = ['xjdr']
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+jax = {extras = ["cuda12"], version = "^0.4.33"}
+jaxlib = "^0.4.33"
+flax = "^0.9.0"
+tiktoken = "0.4.0"
+pydantic = "^2.9.2"
+tyro = "^0.8.11"
+blobfile = "^3.0.0"
+ml-dtypes = "^0.5.0"
+rich = "^13.8.1"
+torch = {version = "^2.4.1+cu124", source = "pytorch"}
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.2"
+ruff = "^0.6.2"
+transformers = "^4.45.1"
+
+
+[tool.poetry.group.test.dependencies]
+torch = "^2.4.1"
+fairscale = "^0.4.13"
+
+
+[[tool.poetry.source]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu124"
+priority = "explicit"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+extend-exclude = ["tests/**"]
+lint.select = [
+  # pycodestyle
+  "E",
+  # Pyflakes
+  "F",
+  # pyupgrade
+  "UP",
+  # flake8-bugbear
+  "B",
+  # flake8-simplify
+  "SIM",
+  # isort
+  "I",
+  # Ruff
+  "RUF",
+]
+lint.ignore = [
+  "E501",   # ignore line-length (e.g. long docstring)
+  "SIM117", # ignore combine with statements (it leads to harder to read code)
+]
+line-length = 88
+indent-width = 2
