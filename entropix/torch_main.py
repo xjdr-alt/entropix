@@ -210,15 +210,15 @@ def main():
     #xfmr_weights = load_weights(ckpt_dir=Path('weights/1B-Base'))
 
     tokenizer = Tokenizer('entropix/tokenizer.model')
-    raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False)
-    raw_tokens2 = tokenizer.encode(prompt2, bos=False, eos=False)
-    raw_tokens3 = tokenizer.encode(prompt3, bos=False, eos=False)
-    raw_tokens4 = tokenizer.encode(prompt4, bos=False, eos=False)
+    raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
+    raw_tokens2 = tokenizer.encode(prompt2, bos=False, eos=False, allowed_special='all')
+    raw_tokens3 = tokenizer.encode(prompt3, bos=False, eos=False, allowed_special='all')
+    raw_tokens4 = tokenizer.encode(prompt4, bos=False, eos=False, allowed_special='all')
 
-    base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False)
-    base_raw_tokens2 = tokenizer.encode(bp2, bos=True, eos=False)
-    base_raw_tokens3 = tokenizer.encode(bp3, bos=True, eos=False)
-    base_raw_tokens4 = tokenizer.encode(bp4, bos=True, eos=False)
+    base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False, allowed_special='all')
+    base_raw_tokens2 = tokenizer.encode(bp2, bos=True, eos=False, allowed_special='all')
+    base_raw_tokens3 = tokenizer.encode(bp3, bos=True, eos=False, allowed_special='all')
+    base_raw_tokens4 = tokenizer.encode(bp4, bos=True, eos=False, allowed_special='all')
 
 
     def generate(xfmr_weights, model_params, tokens):
