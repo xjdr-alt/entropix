@@ -29,7 +29,7 @@ poetry install
 download weights (Base and Instruct)
 ```
 poetry run python download_weights.py --model-id meta-llama/Llama-3.2-1B --out-dir weights/1B-Base
-poetry run python download_weights.py --model-id meta-llama/Llama-3.2-1B --out-dir weights/1B-Base
+poetry run python download_weights.py --model-id meta-llama/Llama-3.2-1B-Instruct --out-dir weights/1B-Instruct
 ```
 
 download tokenizer.model from huggingface (or wherever) into the entropix folder
