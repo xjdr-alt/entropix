@@ -38,3 +38,7 @@ run it
 ```bash
  PYTHONPATH=. poetry run python entropix/main.py
 ```   
+
+
+NOTES:
+If youre using using the torch parts only, you can `export XLA_PYTHON_CLIENT_PREALLOCATE=false` to prevent jax from doing jax things and hogging your VRAM
