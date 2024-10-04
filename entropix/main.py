@@ -193,9 +193,17 @@ def multinomial_sample_one(probs_sort: jax.Array, key) -> jax.Array:
   return jnp.argmax(probs_sort / q, axis=-1, keepdims=True).astype(jnp.int32)
 
 
-def _sample(logits: jax.Array, temperature=0.666, top_p=0.90, top_k=27, key=jax.random.PRNGKey(1337)) -> jax.Array:
+def _sample(logits: jax.Array, temperature=0.666, top_p=0.90, top_k=27, key=jax.random.PRNGKey(1337), min_p=0.0) -> jax.Array:
   bsz = logits.shape[0]
   logit = logits[:, -1]
+  
+  # Apply min_p sampling
+  if min_p > 0:
+    probs = jax.nn.softmax(logit / temperature, axis=-1)
+    top_p = jnp.max(probs, axis=-1, keepdims=True)
+    indices_to_remove = probs < min_p * top_p
+    logit = jnp.where(indices_to_remove, jnp.full_like(logit, float('-inf')), logit)
+
   probs = jax.nn.softmax(logit / temperature, axis=-1)
 
   # Apply top-k sampling
@@ -214,7 +222,7 @@ def _sample(logits: jax.Array, temperature=0.666, top_p=0.90, top_k=27, key=jax.
   return next_token_g_jax.astype(jnp.int32)
 
 
-def sample(gen_tokens: jax.Array, logits: jax.Array, temperature=0.666, top_p=0.90, top_k=27, key=jax.random.PRNGKey(1337)) -> jax.Array:
+def sample(gen_tokens: jax.Array, logits: jax.Array, temperature=0.666, top_p=0.90, top_k=27, key=jax.random.PRNGKey(1337), min_p=0.0) -> jax.Array:
     ent, vent = calculate_varentropy_logsoftmax(logits)
 
     # Low Entropy, Low Varentropy: "flowing with unspoken intent"
@@ -228,7 +236,7 @@ def sample(gen_tokens: jax.Array, logits: jax.Array, temperature=0.666, top_p=0.
             return jnp.array([[2564]])  # Assuming 2564 is our "ask clarifying question" token
         else:
             # If we've just asked a question, sample with slightly higher temperature
-            return _sample(logits, temperature=min(1.3, temperature * 1.5))
+            return _sample(logits, temperature=min(1.3, temperature * 1.5), top_p=top_p, top_k=top_k, key=key, min_p=min_p)
 
     # Low Entropy, High Varentropy: "exploring forks in the path"
     elif ent < 5.0 and vent > 5.0:
@@ -236,18 +244,18 @@ def sample(gen_tokens: jax.Array, logits: jax.Array, temperature=0.666, top_p=0.
         # Return top-k tokens to allow for branching
         #top_k_values, top_k_indices = jax.lax.top_k(logits[:, -1], k=top_k)
         #return top_k_indices
-        return _sample(logits, temperature=min(1.2, temperature * 1.5))
+        return _sample(logits, temperature=min(1.2, temperature * 1.5), top_p=top_p, top_k=top_k, key=key, min_p=min_p)
 
     # High Entropy, High Varentropy: "resampling in the mist"
     elif ent > 5.0 and vent > 5.0:
         # Use high temperature and min_p sampling
-        return _sample(logits, temperature=max(2.0, temperature * 3))
+        return _sample(logits, temperature=max(2.0, temperature * 3), top_p=top_p, top_k=top_k, key=key, min_p=min_p)
 
     # Middle ground: smooth transition
     else:
         # Interpolate temperature based on entropy and varentropy
         t = jnp.clip((ent + vent) / 10.0, 0.5, 2.0)
-        return _sample(logits, temperature=t * temperature)
+        return _sample(logits, temperature=t * temperature, top_p=top_p, top_k=top_k, key=key, min_p=min_p)
 
 
 def main():

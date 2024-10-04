@@ -186,10 +186,25 @@ def calculate_varentropy_logsoftmax(logits: torch.Tensor, axis: int = -1) -> Tup
   varentropy = torch.sum(probs * (log_probs / LN_2 + entropy.unsqueeze(-1))**2, dim=axis)
   return entropy, varentropy
 
-def _sample(logits: torch.Tensor, temperature=0.666, top_p=0.90, top_k=27) -> torch.Tensor:
+def _sample(logits: torch.Tensor, temperature=0.666, top_p=0.90, top_k=27, min_p=0.0) -> torch.Tensor:
   bsz = logits.shape[0]
   logit = logits[:, -1]
+    
+  # Apply min_p sampling
+  if min_p > 0:
+    probs = F.softmax(logit / temperature, dim=-1)
+    top_p, _ = probs.max(dim=-1, keepdim=True)
+    indices_to_remove = probs < min_p * top_p
+    logit[indices_to_remove] = float('-inf')
+  
+  # Apply top_k sampling
+  if top_k > 0:
+    probs = F.softmax(logit / temperature, dim=-1)
+    indices_to_remove = probs < torch.topk(probs, top_k, dim=-1)[0][..., -1, None]
+    logit[indices_to_remove] = float('-inf')
+
   probs = F.softmax(logit / temperature, dim=-1)
+
   probs_sort, probs_idx = torch.sort(probs, dim=-1, descending=True)
   probs_sum = torch.cumsum(probs_sort, dim=-1)
   mask = probs_sum - probs_sort > top_p
@@ -199,7 +214,7 @@ def _sample(logits: torch.Tensor, temperature=0.666, top_p=0.90, top_k=27) -> to
   next_token = torch.gather(probs_idx, -1, next_token)
   return next_token
 
-def sample(gen_tokens: torch.Tensor, logits: torch.Tensor, temperature=0.666, top_p=0.90, top_k=27) -> torch.Tensor:
+def sample(gen_tokens: torch.Tensor, logits: torch.Tensor, temperature=0.666, top_p=0.90, top_k=27, min_p=0.0) -> torch.Tensor:
     ent, vent = calculate_varentropy_logsoftmax(logits)
 
     # Low Entropy, Low Varentropy: "flowing with unspoken intent"
@@ -213,7 +228,7 @@ def sample(gen_tokens: torch.Tensor, logits: torch.Tensor, temperature=0.666, to
             return torch.tensor([[2564]], dtype=torch.long)  # Assuming 2564 is our "ask clarifying question" token
         else:
             # If we've just asked a question, sample with slightly higher temperature
-            return _sample(logits, temperature=min(1.3, temperature * 1.5))
+            return _sample(logits, temperature=min(1.3, temperature * 1.5), top_p=top_p, top_k=top_k, min_p=min_p)
 
     # Low Entropy, High Varentropy: "exploring forks in the path"
     elif ent < 5.0 and vent > 5.0:
@@ -221,18 +236,18 @@ def sample(gen_tokens: torch.Tensor, logits: torch.Tensor, temperature=0.666, to
         # Return top-k tokens to allow for branching
         #top_k_values, top_k_indices = torch.topk(logits[:, -1], k=top_k)
         #return top_k_indices
-        return _sample(logits, temperature=min(1.2, temperature * 1.5))
+        return _sample(logits, temperature=min(1.2, temperature * 1.5), top_p=top_p, top_k=top_k, min_p=min_p)
 
     # High Entropy, High Varentropy: "resampling in the mist"
     elif ent > 5.0 and vent > 5.0:
         # Use high temperature and min_p sampling
-        return _sample(logits, temperature=max(2.0, temperature * 3))
+        return _sample(logits, temperature=max(2.0, temperature * 3), top_p=top_p, top_k=top_k, min_p=min_p)
 
     # Middle ground: smooth transition
     else:
         # Interpolate temperature based on entropy and varentropy
         t = torch.clamp((ent + vent) / 10.0, 0.5, 2.0)
-        return _sample(logits, temperature=t * temperature)
+        return _sample(logits, temperature=t * temperature, top_p=top_p, top_k=top_k, min_p=min_p)
 
 
 def main():
