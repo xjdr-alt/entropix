@@ -161,6 +161,7 @@ def precompute_freqs_cis(
     dim: int, end: int, theta: float = 10000.0, use_scaled: bool = False
 ):
     freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
+    freqs = freqs.cuda()
     t = torch.arange(end, device=freqs.device, dtype=torch.float32)
     if use_scaled:
         freqs = apply_scaling(freqs)
@@ -175,7 +176,7 @@ def build_attn_mask(seqlen: int, start_pos: int) -> torch.Tensor:
       mask = torch.full((seqlen, seqlen), float("-inf"))
       mask = torch.triu(mask, diagonal=1)
       mask = torch.hstack([torch.zeros((seqlen, start_pos)), mask]).to(torch.bfloat16)
-  return mask
+  return mask.cuda()
 
 
 LN_2 = 0.69314718056  # ln(2) = 1.0 / LOG2_E
@@ -234,7 +235,7 @@ def main():
       gen_tokens = next_token
       print(tokenizer.decode([next_token.item()]), end='', flush=True)
       cur_pos = seqlen
-      stop = torch.tensor([128001, 128008, 128009])
+      stop = torch.tensor([128001, 128008, 128009]).cuda()
       #stop = torch.tensor(tokenizer.stop_tokens)
       while cur_pos < 2048:
         cur_pos += 1

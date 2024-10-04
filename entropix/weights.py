@@ -36,21 +36,21 @@ def load_weights(ckpt_dir: Path = Path('weights/1B-Instruct'), n_layers: int = 1
     w[name] = jax.device_put(weight, device)
   for i in range(n_layers):
     layer_weights.append(LayerWeights(
-      wq=w[f'layers.{i}.attention.wq.weight'],
-      wk=w[f'layers.{i}.attention.wk.weight'],
-      wv=w[f'layers.{i}.attention.wv.weight'],
-      wo=w[f'layers.{i}.attention.wo.weight'],
-      w1=w[f'layers.{i}.feed_forward.w1.weight'],
-      w2=w[f'layers.{i}.feed_forward.w2.weight'],
-      w3=w[f'layers.{i}.feed_forward.w3.weight'],
-      ffn_norm=w[f'layers.{i}.ffn_norm.weight'],
-      attention_norm=w[f'layers.{i}.attention_norm.weight'],
+      wq=w[f'layers.{i}.attention.wq.weight.npy'],
+      wk=w[f'layers.{i}.attention.wk.weight.npy'],
+      wv=w[f'layers.{i}.attention.wv.weight.npy'],
+      wo=w[f'layers.{i}.attention.wo.weight.npy'],
+      w1=w[f'layers.{i}.feed_forward.w1.weight.npy'],
+      w2=w[f'layers.{i}.feed_forward.w2.weight.npy'],
+      w3=w[f'layers.{i}.feed_forward.w3.weight.npy'],
+      ffn_norm=w[f'layers.{i}.ffn_norm.weight.npy'],
+      attention_norm=w[f'layers.{i}.attention_norm.weight.npy'],
     ))
 
   xfmr_weights = XfmrWeights(
-    tok_embeddings=w['tok_embeddings.weight'],
-    norm=w['norm.weight'],
-    output=w['output.weight'],
+    tok_embeddings=w['tok_embeddings.weight.npy'],
+    norm=w['norm.weight.npy'],
+    output=w['output.weight.npy'],
     layer_weights=layer_weights
   )
 

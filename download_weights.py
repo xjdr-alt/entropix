@@ -65,7 +65,7 @@ def fixed_get_imports(filename: str | os.PathLike) -> list[str]:
 
 
 def main(model_id: str, out_dir: Path):
-    t_path = Path.home() / '.hf_token'
+    t_path = Path(os.environ.get('HF_HOME', Path.home())) / 'token'
     token = t_path.read_text().strip()
     if not out_dir.exists():
         out_dir.mkdir(parents=True, exist_ok=True)
