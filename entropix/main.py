@@ -193,9 +193,17 @@ def multinomial_sample_one(probs_sort: jax.Array, key) -> jax.Array:
   return jnp.argmax(probs_sort / q, axis=-1, keepdims=True).astype(jnp.int32)
 
 
-def _sample(logits: jax.Array, temperature=0.666, top_p=0.90, top_k=27, key=jax.random.PRNGKey(1337)) -> jax.Array:
+def _sample(logits: jax.Array, temperature=0.666, top_p=0.90, top_k=27, min_p: float = 0.0, key=jax.random.PRNGKey(1337)) -> jax.Array:
   bsz = logits.shape[0]
   logit = logits[:, -1]
+  probs = jax.nn.softmax(logit / temperature, axis=-1)
+
+  # Apply min_p sampling
+  if min_p > 0.0:
+    p_max = jnp.max(probs, axis=-1, keepdims=True)
+    indices_to_remove = probs < (min_p * p_max)
+    logit = jnp.where(indices_to_remove, jnp.full_like(logit, float('-inf')), logit)
+
   probs = jax.nn.softmax(logit / temperature, axis=-1)
 
   # Apply top-k sampling
@@ -214,7 +222,7 @@ def _sample(logits: jax.Array, temperature=0.666, top_p=0.90, top_k=27, key=jax.
   return next_token_g_jax.astype(jnp.int32)
 
 
-def sample(gen_tokens: jax.Array, logits: jax.Array, temperature=0.666, top_p=0.90, top_k=27, key=jax.random.PRNGKey(1337)) -> jax.Array:
+def sample(gen_tokens: jax.Array, logits: jax.Array, temperature=0.666, top_p=0.90, top_k=27, min_p: float = 0.0, key=jax.random.PRNGKey(1337)) -> jax.Array:
     ent, vent = calculate_varentropy_logsoftmax(logits)
 
     # Low Entropy, Low Varentropy: "flowing with unspoken intent"
