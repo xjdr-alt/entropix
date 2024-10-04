@@ -4,13 +4,13 @@ import torch.nn as nn
 class KVCache(nn.Module):
     def __init__(self, layers: int, bsz: int, max_seq_len: int, kv_heads: int, head_dim: int):
         super(KVCache, self).__init__()
-        # Initialize k and v as buffers on cuda to ensure they're part of the module state
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.register_buffer(
             'k',
             torch.zeros(
                 (layers, bsz, max_seq_len, kv_heads, head_dim),
                 dtype=torch.bfloat16,
-                device=torch.device('cuda')
+                device=device
             )
         )
         self.register_buffer(
@@ -18,7 +18,7 @@ class KVCache(nn.Module):
             torch.zeros(
                 (layers, bsz, max_seq_len, kv_heads, head_dim),
                 dtype=torch.bfloat16,
-                device=torch.device('cuda')
+                device=device
             )
         )
 
