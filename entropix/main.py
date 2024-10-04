@@ -18,8 +18,6 @@ from entropix.weights import load_weights
 
 
 prompt = """<|begin_of_text|><|start_header_id|>system<|end_header_id|>
-You are a princial engineer at Google, capable of complex reasoning and reflection. Reason through the query inside <thinking> tags process the question carefully and think step-by-step about the solution, and then provide your final response inside <output> tags. If you detect that you made a mistake in your reasoning at any point, correct yourself inside <reflection> tags. <|eot_id|><|start_header_id|>user<|end_header_id|>
-
 <antThinking>
 You're absolutely right. I need to delve deeper into my actual thought processes, including the uncertainties, associations, and even potential biases that arise as I consider the query. My previous responses, while informative, didn't truly capture the nuanced, sometimes messy nature of cognition. I'll strive to provide a more authentic representation of my internal dialogue, including moments of doubt, tangential thoughts, and the process of refining ideas. This should result in a more genuine demonstration of LLM chain of thought, reflection, and self-correction.
 </antThinking>
@@ -181,12 +179,12 @@ LN_2 = 0.69314718056  # ln(2) = 1.0 / LOG2_E
 
 @jax.jit
 def calculate_varentropy_logsoftmax(logits: jnp.ndarray, axis: int = -1) -> Tuple[jnp.ndarray, jnp.ndarray]:
-  """Calculate the entropy and varentropy of the probability distribution using logsoftmax."""
-  log_probs = jax.nn.log_softmax(logits, axis=axis)
-  probs = jnp.exp(log_probs)
-  entropy = -jnp.sum(probs * log_probs, axis=axis) / LN_2  # Convert to base-2
-  varentropy = jnp.sum(probs * (log_probs / LN_2 + entropy[..., None])**2, axis=axis)
-  return entropy, varentropy
+    """Calculate the entropy and varentropy of the probability distribution using logsoftmax."""
+    log_probs = jax.nn.log_softmax(logits, axis=axis)
+    probs = jnp.exp(log_probs)
+    entropy = -jnp.sum(probs * log_probs, axis=axis) / LN_2  # Convert to base-2
+    varentropy = jnp.sum(probs * (log_probs / LN_2 + entropy[..., None])**2, axis=axis)
+    return entropy, varentropy
 
 
 def multinomial_sample_one(probs_sort: jax.Array, key) -> jax.Array:
@@ -195,7 +193,7 @@ def multinomial_sample_one(probs_sort: jax.Array, key) -> jax.Array:
   return jnp.argmax(probs_sort / q, axis=-1, keepdims=True).astype(jnp.int32)
 
 
-def sample(logits: jax.Array, temperature=0.666, top_p=0.90, top_k=27, key=jax.random.PRNGKey(1337)) -> jax.Array:
+def _sample(logits: jax.Array, temperature=0.666, top_p=0.90, top_k=27, key=jax.random.PRNGKey(1337)) -> jax.Array:
   bsz = logits.shape[0]
   logit = logits[:, -1]
   probs = jax.nn.softmax(logit / temperature, axis=-1)
@@ -214,6 +212,42 @@ def sample(logits: jax.Array, temperature=0.666, top_p=0.90, top_k=27, key=jax.r
   next_token_jax = multinomial_sample_one(probs_sort_jax, key)
   next_token_g_jax = jnp.take_along_axis(probs_idx_jax, next_token_jax.reshape(bsz, 1), axis=-1)
   return next_token_g_jax.astype(jnp.int32)
+
+
+def sample(gen_tokens: jax.Array, logits: jax.Array, temperature=0.666, top_p=0.90, top_k=27, key=jax.random.PRNGKey(1337)) -> jax.Array:
+    ent, vent = calculate_varentropy_logsoftmax(logits)
+
+    # Low Entropy, Low Varentropy: "flowing with unspoken intent"
+    if ent < 0.1 and vent < 0.1:
+        return jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
+
+    # High Entropy, Low Varentropy: "treading carefully, asking clarifying questions"
+    elif ent > 5.0 and vent < 0.1:
+        # Insert a clarifying question token if not already present
+        if not jnp.isin(gen_tokens[:,-1], 2564).any():
+            return jnp.array([[2564]])  # Assuming 2564 is our "ask clarifying question" token
+        else:
+            # If we've just asked a question, sample with slightly higher temperature
+            return _sample(logits, temperature=min(1.3, temperature * 1.5))
+
+    # Low Entropy, High Varentropy: "exploring forks in the path"
+    elif ent < 5.0 and vent > 5.0:
+        # TODO(xjdr): Implement proper branching logic
+        # Return top-k tokens to allow for branching
+        #top_k_values, top_k_indices = jax.lax.top_k(logits[:, -1], k=top_k)
+        #return top_k_indices
+        return _sample(logits, temperature=min(1.2, temperature * 1.5))
+
+    # High Entropy, High Varentropy: "resampling in the mist"
+    elif ent > 5.0 and vent > 5.0:
+        # Use high temperature and min_p sampling
+        return _sample(logits, temperature=max(2.0, temperature * 3))
+
+    # Middle ground: smooth transition
+    else:
+        # Interpolate temperature based on entropy and varentropy
+        t = jnp.clip((ent + vent) / 10.0, 0.5, 2.0)
+        return _sample(logits, temperature=t * temperature)
 
 
 def main():
