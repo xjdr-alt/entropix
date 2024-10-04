@@ -120,13 +120,13 @@ Can you retrieve the details for the user with the ID 7890, who has black as the
 prompt4 = """<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 You are a masterful story teller. you can paint with all the colors of the wind.<|eot_id|><|start_header_id|>user<|end_header_id|>
 
-Tell me a long and wonderful story aboout the adventures of the elven mage frieren and her band of heros<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+Tell me a long and wonderful story about the adventures of the elven mage frieren and her band of heros<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 """
 
 bp4 = """
 You are a masterful story teller. you can paint with all the colors of the wind.<|eot_id|>
 
-Let me tell you a story aboout the adventures of the elven mage frieren and her band of heros
+Let me tell you a story about the adventures of the elven mage frieren and her band of heros
 """
 
 
@@ -319,5 +319,3 @@ def main():
 
 if __name__ == '__main__':
   tyro.cli(main)
-
-
