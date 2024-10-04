@@ -285,12 +285,8 @@ def main():
     while cur_pos < 2048:
       cur_pos += 1
       logits, kvcache = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache)
-      # TODO(xjdr): Add gen_tokens back when we add DRY and Entropy Sampler
-      #next_token = sample(gen_tokens, logits)
-      next_token = sample(logits)
+      next_token = sample(gen_tokens, logits)
       gen_tokens = jnp.concatenate((gen_tokens, next_token))
-      #print(f'{gen_tokens.shape=}')
-      #next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
       print(tokenizer.decode(next_token.tolist()[0]), end='', flush=True)
       if jnp.isin(next_token, stop).any():
         break

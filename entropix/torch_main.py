@@ -272,10 +272,8 @@ def main():
       while cur_pos < 2048:
         cur_pos += 1
         logits, kvcache = cxfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache)
+        next_token = sample(gen_tokens, logits)
         gen_tokens = torch.cat((gen_tokens, next_token), dim=1)
-        # TODO(xjdr): We need to add gen tokens back when we add DRY and Entropy Samplers back
-        #next_token = sample(gen_tokens, logits)
-        next_token = sample(logits)
         print(tokenizer.decode(next_token.tolist()[0]), end='', flush=True)
         if torch.isin(next_token, stop).any():
           break
