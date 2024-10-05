@@ -52,11 +52,8 @@ poetry run python download_weights.py --model-id meta-llama/Llama-3.2-1B-Instruc
 ```
 
 download tokenizer.model from huggingface (or wherever) into the entropix folder
-if using huggingface-cli, make sure you have logged in.
-```bash
-poetry run huggingface-cli download meta-llama/Meta-Llama-3.1-8B-Instruct --include "original/tokenizer.model" --local-dir entropix/tokenizer.model
-```
 
+run it
 run it
 ```bash
  PYTHONPATH=. poetry run python entropix/main.py

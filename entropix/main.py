@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import math
 import tyro
 
+from entropix.stats import AttnStats
 
 from pathlib import Path
 from functools import partial
@@ -41,7 +42,6 @@ def apply_scaling(freqs: jax.Array):
       lambda _: jax.lax.cond(wavelen > low_freq_wavelen, lambda _: freq / SCALE_FACTOR, scale_mid, None),
       None
     )
-
   return jax.vmap(scale_freq)(freqs)
 
 
@@ -69,6 +69,17 @@ def main():
 
   tokenizer = Tokenizer('entropix/tokenizer.model')
   raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
+  raw_tokens2 = tokenizer.encode(prompt2, bos=False, eos=False, allowed_special='all')
+  raw_tokens3 = tokenizer.encode(prompt3, bos=False, eos=False, allowed_special='all')
+  raw_tokens4 = tokenizer.encode(prompt4, bos=False, eos=False, allowed_special='all')
+
+  base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False, allowed_special='all')
+  base_raw_tokens2 = tokenizer.encode(bp2, bos=True, eos=False, allowed_special='all')
+  base_raw_tokens3 = tokenizer.encode(bp3, bos=True, eos=False, allowed_special='all')
+  base_raw_tokens4 = tokenizer.encode(bp4, bos=True, eos=False, allowed_special='all')
+
+
+  raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
   base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False, allowed_special='all')
 
   # Create the batch of tokens
@@ -85,7 +96,7 @@ def main():
     gen_tokens = next_token
     print(tokenizer.decode([next_token.item()]), end='', flush=True)
     cur_pos = seqlen
-    stop = jnp.array([128001, 128008, 128009])
+    stop = jnp.array([128001, 128008, 128009]) 
     #stop = jnp.array(tokenizer.stop_tokens)
     while cur_pos < 8192:
       cur_pos += 1
