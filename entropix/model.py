@@ -52,13 +52,14 @@ def xfmr(xfmr_weights: XfmrWeights, model_params: ModelParams, tokens: jax.Array
     h = xfmr_weights.tok_embeddings[tokens]
     attn_stats = AttnStats.new(
         bsz=tokens.shape[0],
+        seq_len=tokens.shape[1],
         n_layers=model_params.n_layers,
         n_heads=model_params.n_local_heads
     )
     for i in range(model_params.n_layers):
         norm_x = rms_norm(h, xfmr_weights.layer_weights[i].attention_norm)
         h_attn, kvcache, scores = attention(norm_x, xfmr_weights.layer_weights[i], model_params, cur_pos, i, freqs_cis, kvcache, attn_mask=attn_mask)
-        attn_stats = attn_stats.update(scores[:,:,-1,:], i)
+        attn_stats = attn_stats.update(scores, i)
         h = h + h_attn
         h = h + feed_forward(rms_norm(h, xfmr_weights.layer_weights[i].ffn_norm), xfmr_weights.layer_weights[i])
     logits = jnp.dot(rms_norm(h, xfmr_weights.norm), xfmr_weights.output.T)
