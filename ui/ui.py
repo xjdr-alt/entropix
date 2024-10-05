@@ -1,9 +1,7 @@
-import os
 import subprocess
 from tkinter import scrolledtext, ttk
 import tkinter as tk
 import threading
-import jax
 import jax.numpy as jnp
 from entropix.config import LLAMA_1B_PARAMS
 from entropix.weights import load_weights
@@ -13,7 +11,6 @@ from entropix.main import sample, precompute_freqs_cis, build_attn_mask
 from entropix.model import xfmr
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from entropix.stats import AttnStats
 import numpy as np
 
 class TextCompletionUI:

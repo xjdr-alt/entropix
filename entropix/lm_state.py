@@ -1,10 +1,7 @@
-from typing import NamedTuple
 from dataclasses import dataclass
 from entropix.model import KVCache
-import math
 import jax
 import jax.numpy as jnp
-from entropix.model import ModelParams
 
 @dataclass
 class LMState:
@@ -15,7 +12,7 @@ class LMState:
     freqs_cis: jax.Array 
     attn_mask: jax.Array
     pos: jax.Array # (bsz, max_seq_len)
-    state: jax.Array # (bsz, 1) which state are we? (flow, turn, fork, explore...)
+    state: jax.Array # (bsz, n_states) which state are we? (flow, turn, fork, explore...)
     
     @property
     def context(self) -> jnp.ndarray:

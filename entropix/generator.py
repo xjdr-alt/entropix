@@ -1,11 +1,8 @@
 from entropix.model import KVCache
 from entropix.rope import precompute_freqs_cis
 from entropix.sampler import sample
-from entropix.LMState import LMState
+from entropix.lm_state import LMState
 from entropix.model import xfmr
-from entropix.sampler import SamplerParams
-from entropix.tokenizer import Tokenizer
-from entropix.config import ModelParams, RopeParams
 import jax.numpy as jnp
 import jax
 

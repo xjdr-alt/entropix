@@ -1,5 +1,5 @@
 
-from typing import Tuple, NamedTuple
+from typing import Tuple
 import jax.numpy as jnp
 import jax
 import math

@@ -1,10 +1,7 @@
 from typing import Optional, Tuple
-
 import jax
 import jax.numpy as jnp
 from entropix.stats import AttnStats
-from functools import partial
-from rich import print as rprint
 from entropix.config import ModelParams
 from entropix.kvcache import KVCache
 from entropix.stats import AttnStats

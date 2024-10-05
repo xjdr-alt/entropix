@@ -1,12 +1,7 @@
 import jax.numpy as jnp
-from dataclasses import dataclass
-from entropix.tokenizer import Tokenizer
 from entropix.config import SamplerParams
-from entropix.model import KVCache
-from entropix.model import xfmr
-from typing import NamedTuple, Tuple
-from entropix.LMState import LMState
-import math
+from typing import Tuple
+from entropix.lm_state import LMState
 import jax 
 
 LN_2 = 0.69314718056  # ln(2) = 1.0 / LOG2_E
