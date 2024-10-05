@@ -127,44 +127,6 @@ Let me tell you a story about the adventures of the elven mage frieren and her b
 Let me tell you a story about the adventures of the elven mage frieren and her band of heros
 """
 
-def main():
-  
-  params = {
-    "dim": 2048,
-    "n_layers": 16,
-    "n_heads": 32,
-    "n_kv_heads": 8,
-    "n_words": 128256,
-    "ffn_dim_multiplier": 1.5,
-    "multiple_of": 256,
-    "norm_eps": 1e-05,
-    "rope_theta": 500000.0,
-    "scale_factor": 8,
-    "low_freq_factor": 1,
-    "high_freq_factor": 4,
-    "old_context_len": 8192,
-    "use_scaled_rope": True,
-    "max_seq_len": 4096
-  }
-  
-  LLAMA_1B_ROPE = RopeParams(
-    rope_theta=params["rope_theta"],
-    use_scaled_rope=params["use_scaled_rope"],
-    scale_factor=params["scale_factor"],
-    low_freq_factor=params["low_freq_factor"],
-    high_freq_factor=params["high_freq_factor"],
-    old_context_len=params["old_context_len"]
-  )
-
-  LLAMA_1B_PARAMS = ModelParams(
-    n_layers=params["n_layers"],
-    n_local_heads=params["n_heads"],
-    n_local_kv_heads=params["n_kv_heads"],
-    head_dim=params["dim"] // params["n_heads"],
-    max_seq_len=params["max_seq_len"],
-    rope_params=LLAMA_1B_ROPE,
-    d_model=params["dim"]
-  )
   
 def main():
   
