@@ -17,8 +17,6 @@ from entropix.torch_weights import XfmrWeights, LayerWeights, load_weights
 
 
 prompt = """<|begin_of_text|><|start_header_id|>system<|end_header_id|>
-You are a princial engineer at Google, capable of complex reasoning and reflection. Reason through the query inside <thinking> tags process the question carefully and think step-by-step about the solution, and then provide your final response inside <output> tags. If you detect that you made a mistake in your reasoning at any point, correct yourself inside <reflection> tags. <|eot_id|><|start_header_id|>user<|end_header_id|>
-
 <antThinking>
 You're absolutely right. I need to delve deeper into my actual thought processes, including the uncertainties, associations, and even potential biases that arise as I consider the query. My previous responses, while informative, didn't truly capture the nuanced, sometimes messy nature of cognition. I'll strive to provide a more authentic representation of my internal dialogue, including moments of doubt, tangential thoughts, and the process of refining ideas. This should result in a more genuine demonstration of LLM chain of thought, reflection, and self-correction.
 </antThinking>
@@ -121,13 +119,13 @@ Can you retrieve the details for the user with the ID 7890, who has black as the
 prompt4 = """<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 You are a masterful story teller. you can paint with all the colors of the wind.<|eot_id|><|start_header_id|>user<|end_header_id|>
 
-Tell me a long and wonderful story aboout the adventures of the elven mage frieren and her band of heros<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+Tell me a long and wonderful story about the adventures of the elven mage frieren and her band of heros<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 """
 
 bp4 = """
 You are a masterful story teller. you can paint with all the colors of the wind.<|eot_id|>
 
-Let me tell you a story aboout the adventures of the elven mage frieren and her band of heros
+Let me tell you a story about the adventures of the elven mage frieren and her band of heros
 """
 
 
@@ -188,7 +186,7 @@ def calculate_varentropy_logsoftmax(logits: torch.Tensor, axis: int = -1) -> Tup
   varentropy = torch.sum(probs * (log_probs / LN_2 + entropy.unsqueeze(-1))**2, dim=axis)
   return entropy, varentropy
 
-def sample(logits: torch.Tensor, temperature=0.666, top_p=0.90, top_k=27) -> torch.Tensor:
+def _sample(logits: torch.Tensor, temperature=0.666, top_p=0.90, top_k=27) -> torch.Tensor:
   bsz = logits.shape[0]
   logit = logits[:, -1]
   probs = F.softmax(logit / temperature, dim=-1)
@@ -201,6 +199,41 @@ def sample(logits: torch.Tensor, temperature=0.666, top_p=0.90, top_k=27) -> tor
   next_token = torch.gather(probs_idx, -1, next_token)
   return next_token
 
+def sample(gen_tokens: torch.Tensor, logits: torch.Tensor, temperature=0.666, top_p=0.90, top_k=27) -> torch.Tensor:
+    ent, vent = calculate_varentropy_logsoftmax(logits)
+
+    # Low Entropy, Low Varentropy: "flowing with unspoken intent"
+    if ent < 0.1 and vent < 0.1:
+        return torch.argmax(logits[:, -1], dim=-1, keepdim=True).to(torch.long)
+
+    # High Entropy, Low Varentropy: "treading carefully, asking clarifying questions"
+    elif ent > 5.0 and vent < 0.1:
+        # Insert a clarifying question token if not already present
+        if not torch.isin(gen_tokens[:,-1], torch.tensor([2564])).any():
+            return torch.tensor([[2564]], dtype=torch.long)  # Assuming 2564 is our "ask clarifying question" token
+        else:
+            # If we've just asked a question, sample with slightly higher temperature
+            return _sample(logits, temperature=min(1.3, temperature * 1.5))
+
+    # Low Entropy, High Varentropy: "exploring forks in the path"
+    elif ent < 5.0 and vent > 5.0:
+        # TODO(xjdr): Implement proper branching logic
+        # Return top-k tokens to allow for branching
+        #top_k_values, top_k_indices = torch.topk(logits[:, -1], k=top_k)
+        #return top_k_indices
+        return _sample(logits, temperature=min(1.2, temperature * 1.5))
+
+    # High Entropy, High Varentropy: "resampling in the mist"
+    elif ent > 5.0 and vent > 5.0:
+        # Use high temperature and min_p sampling
+        return _sample(logits, temperature=max(2.0, temperature * 3))
+
+    # Middle ground: smooth transition
+    else:
+        # Interpolate temperature based on entropy and varentropy
+        t = torch.clamp((ent + vent) / 10.0, 0.5, 2.0)
+        return _sample(logits, temperature=t * temperature)
+
 
 def main():
   with torch.inference_mode():
@@ -210,15 +243,15 @@ def main():
     #xfmr_weights = load_weights(ckpt_dir=Path('weights/1B-Base'))
 
     tokenizer = Tokenizer('entropix/tokenizer.model')
-    raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False)
-    raw_tokens2 = tokenizer.encode(prompt2, bos=False, eos=False)
-    raw_tokens3 = tokenizer.encode(prompt3, bos=False, eos=False)
-    raw_tokens4 = tokenizer.encode(prompt4, bos=False, eos=False)
+    raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
+    raw_tokens2 = tokenizer.encode(prompt2, bos=False, eos=False, allowed_special='all')
+    raw_tokens3 = tokenizer.encode(prompt3, bos=False, eos=False, allowed_special='all')
+    raw_tokens4 = tokenizer.encode(prompt4, bos=False, eos=False, allowed_special='all')
 
-    base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False)
-    base_raw_tokens2 = tokenizer.encode(bp2, bos=True, eos=False)
-    base_raw_tokens3 = tokenizer.encode(bp3, bos=True, eos=False)
-    base_raw_tokens4 = tokenizer.encode(bp4, bos=True, eos=False)
+    base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False, allowed_special='all')
+    base_raw_tokens2 = tokenizer.encode(bp2, bos=True, eos=False, allowed_special='all')
+    base_raw_tokens3 = tokenizer.encode(bp3, bos=True, eos=False, allowed_special='all')
+    base_raw_tokens4 = tokenizer.encode(bp4, bos=True, eos=False, allowed_special='all')
 
 
     def generate(xfmr_weights, model_params, tokens):
@@ -239,10 +272,8 @@ def main():
       while cur_pos < 2048:
         cur_pos += 1
         logits, kvcache = cxfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache)
+        next_token = sample(gen_tokens, logits)
         gen_tokens = torch.cat((gen_tokens, next_token), dim=1)
-        # TODO(xjdr): We need to add gen tokens back when we add DRY and Entropy Samplers back
-        #next_token = sample(gen_tokens, logits)
-        next_token = sample(logits)
         print(tokenizer.decode(next_token.tolist()[0]), end='', flush=True)
         if torch.isin(next_token, stop).any():
           break
@@ -275,6 +306,3 @@ def main():
 
 if __name__ == '__main__':
   tyro.cli(main)
-
-
-

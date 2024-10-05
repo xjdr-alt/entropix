@@ -31,7 +31,7 @@ def generate(xfmr_weights, model_params, sampler_params, tokenizer, tokens):
       state=jnp.zeros((bsz, 1), dtype=jnp.int32),
       pos=0
     )
-    lm_state.logits, lm_state.kvcache, _ = xfmr(xfmr_weights, model_params, lm_state.context, lm_state.pos, freqs_cis=lm_state.freqs_cis[:seqlen], kvcache=lm_state.kvcache, attn_mask=lm_state.attn_mask)
+    lm_state.logits, lm_state.kvcache, _ = xfmr(xfmr_weights, model_params, lm_state.prompt, lm_state.pos, freqs_cis=lm_state.freqs_cis[:seqlen], kvcache=lm_state.kvcache, attn_mask=lm_state.attn_mask)
     next_token = jnp.argmax(lm_state.logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
     lm_state.gen_tokens, lm_state.pos = jnp.concatenate((lm_state.gen_tokens, next_token), axis=1), seqlen
     print(tokenizer.decode([next_token.item()]), end='', flush=True)
