@@ -28,7 +28,7 @@ class AttnStats(NamedTuple):
         return jnp.sqrt(jnp.mean(self.varentropy)) / (self.n_heads * self.n_layers)
 
     def update(self, scores: jax.Array, layer_idx: int):
-        # scores shape: (bsz, n_heads, seqlen, vocab_size)
+        # scores shape: (bsz, n_heads, seqlen, n_words)
         probs = jax.nn.softmax(scores, axis=-1)
         new_entropy = -jnp.sum(jnp.where(probs > 0, probs * jnp.log(probs), 0), axis=-1)
         new_varentropy = jnp.sum(probs * (jnp.log(probs) + new_entropy[..., None])**2, axis=-1)
