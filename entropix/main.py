@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import math
 import tyro
 
+from entropix.stats import AttnStats
 
 from pathlib import Path
 from functools import partial
@@ -155,7 +156,6 @@ def apply_scaling(freqs: jax.Array):
       lambda _: jax.lax.cond(wavelen > low_freq_wavelen, lambda _: freq / SCALE_FACTOR, scale_mid, None),
       None
     )
-
   return jax.vmap(scale_freq)(freqs)
 
 
@@ -222,15 +222,15 @@ def main():
   #xfmr_weights = load_weights(ckpt_dir=Path('weights/1B-Base'))
 
   tokenizer = Tokenizer('entropix/tokenizer.model')
-  raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False)
-  raw_tokens2 = tokenizer.encode(prompt2, bos=False, eos=False)
-  raw_tokens3 = tokenizer.encode(prompt3, bos=False, eos=False)
-  raw_tokens4 = tokenizer.encode(prompt4, bos=False, eos=False)
+  raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
+  raw_tokens2 = tokenizer.encode(prompt2, bos=False, eos=False, allowed_special='all')
+  raw_tokens3 = tokenizer.encode(prompt3, bos=False, eos=False, allowed_special='all')
+  raw_tokens4 = tokenizer.encode(prompt4, bos=False, eos=False, allowed_special='all')
 
-  base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False)
-  base_raw_tokens2 = tokenizer.encode(bp2, bos=True, eos=False)
-  base_raw_tokens3 = tokenizer.encode(bp3, bos=True, eos=False)
-  base_raw_tokens4 = tokenizer.encode(bp4, bos=True, eos=False)
+  base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False, allowed_special='all')
+  base_raw_tokens2 = tokenizer.encode(bp2, bos=True, eos=False, allowed_special='all')
+  base_raw_tokens3 = tokenizer.encode(bp3, bos=True, eos=False, allowed_special='all')
+  base_raw_tokens4 = tokenizer.encode(bp4, bos=True, eos=False, allowed_special='all')
 
 
   def generate(xfmr_weights, model_params, tokens):
@@ -241,16 +241,16 @@ def main():
     attn_mask = build_attn_mask(seqlen, cur_pos)
     freqs_cis = precompute_freqs_cis(model_params.head_dim, model_params.max_seq_len, model_params.rope_theta, model_params.use_scaled_rope)
     kvcache = KVCache.new(model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim)
-    logits, kvcache = xfmr(xfmr_weights, model_params, tokens, cur_pos, freqs_cis[:seqlen], kvcache, attn_mask=attn_mask)
+    logits, kvcache, _ = xfmr(xfmr_weights, model_params, tokens, cur_pos, freqs_cis[:seqlen], kvcache, attn_mask=attn_mask)
     next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
     gen_tokens = next_token
     print(tokenizer.decode([next_token.item()]), end='', flush=True)
     cur_pos = seqlen
-    stop = jnp.array([128001, 128008, 128009])
+    stop = jnp.array([128001, 128008, 128009]) 
     #stop = jnp.array(tokenizer.stop_tokens)
     while cur_pos < 2048:
       cur_pos += 1
-      logits, kvcache = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache)
+      logits, kvcache, _ = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache)
       # TODO(xjdr): Add gen_tokens back when we add DRY and Entropy Sampler
       #next_token = sample(gen_tokens, logits)
       next_token = sample(logits)
@@ -290,4 +290,74 @@ def main():
 if __name__ == '__main__':
   tyro.cli(main)
 
+def generate_text(prompt: str) -> Tuple[str, AttnStats]:
+    """
+    Generates text based on the provided prompt and returns the generated text along with AttnStats.
+
+    Args:
+        prompt (str): The input prompt for text generation.
+
+    Returns:
+        Tuple[str, AttnStats]: Generated text and its corresponding attention statistics.
+    """
+    model_params = LLAMA_1B_PARAMS
+    xfmr_weights = load_weights()
+    
+    tokenizer = Tokenizer('entropix/tokenizer.model')
+    
+    raw_tokens = tokenizer.encode(prompt, bos=False, eos=False)
+    
+    tokens = jnp.array([raw_tokens], jnp.int32)
+    seqlen = tokens.shape[1]
+    
+    attn_mask = build_attn_mask(seqlen, cur_pos)
+    freqs_cis = precompute_freqs_cis(
+        dim=model_params.head_dim,
+        end=model_params.max_seq_len,
+        theta=model_params.rope_theta,
+        use_scaled=model_params.use_scaled_rope
+    )
+    kvcache = KVCache.new(
+        layers=model_params.n_layers,
+        bsz=tokens.shape[0],
+        max_seq_len=model_params.max_seq_len,
+        kv_heads=model_params.n_local_kv_heads,
+        head_dim=model_params.head_dim
+    )    
+    logits, kvcache, attn_stats = xfmr(
+        xfmr_weights=xfmr_weights,
+        model_params=model_params,
+        tokens=tokens,
+        cur_pos=0,
+        freqs_cis=freqs_cis[:seqlen],
+        kvcache=kvcache,
+        attn_stats=attn_stats,
+        attn_mask=attn_mask
+    )
+    next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
+    gen_tokens = next_token
+    generated_tokens = [next_token.item()]
+    cur_pos = seqlen
+    stop = jnp.array([128001, 128008, 128009])
+    
+    while cur_pos < 2048:
+        cur_pos += 1
+        logits, kvcache, attn_stats = xfmr(
+            xfmr_weights=xfmr_weights,
+            model_params=model_params,
+            tokens=next_token,
+            cur_pos=cur_pos,
+            freqs_cis=freqs_cis[cur_pos:cur_pos+1],
+            kvcache=kvcache,
+            attn_stats=attn_stats,
+            attn_mask=build_attn_mask(seqlen, cur_pos)
+        )
+        next_token = sample(logits)
+        gen_tokens.append(int(next_token))
+        if jnp.isin(next_token, stop).any():
+            break
+    
+    generated_text = tokenizer.decode(gen_tokens)
+    
+    return generated_text, attn_stats
 
