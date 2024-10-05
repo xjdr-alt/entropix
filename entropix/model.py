@@ -29,7 +29,7 @@ def attention(x: jax.Array, layer_weights: LayerWeights, model_params, cur_pos: 
     keys, values, kvcache = kvcache.update(xk, xv, layer_idx, cur_pos, n_rep)
     xq = jnp.transpose(xq, (0, 2, 1, 3))  # (bs, n_heads, seqlen, head_dim)
     keys = jnp.transpose(keys, (0, 2, 3, 1))  # (bs, n_heads, head_dim, cache_len + seqlen)
-    values = jnp.transpose(values, (0, 2, 1, 3))  # (bs, n_heads, cache_len + seqlen, head_dim)
+    values = jnp.transpose(values, (0, 2, 1, 3))  #git (bs, n_heads, cache_len + seqlen, head_dim)
     scores = jnp.matmul(xq, keys)
     scores = scores / jnp.sqrt(model_params.head_dim)
     scores = scores.astype(jnp.float32)  # Always do attention softmax at float32
