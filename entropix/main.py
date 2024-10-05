@@ -3,6 +3,7 @@ from entropix.config import SamplerParams, ModelParams, RopeParams
 import jax
 import jax.numpy as jnp
 from entropix.generator import generate
+from entropix.generator import generate
 import math
 import tyro
 from pathlib import Path
@@ -79,6 +80,7 @@ Here is a list of functions in JSON format that you can invoke.[
 Can you retrieve the details for the user with the ID 7890, who has black as their special request?<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 """
 
+
 bp3 = """
 Here is a list of functions in JSON format that I can invoke.[
     {
@@ -115,14 +117,55 @@ prompt4 = """<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 You are a masterful story teller. you can paint with all the colors of the wind.<|eot_id|><|start_header_id|>user<|end_header_id|>
 
 Tell me a long and wonderful story about the adventures of the elven mage frieren and her band of heros<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+Tell me a long and wonderful story about the adventures of the elven mage frieren and her band of heros<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 """
 
 bp4 = """
 You are a masterful story teller. you can paint with all the colors of the wind.<|eot_id|>
 
 Let me tell you a story about the adventures of the elven mage frieren and her band of heros
+Let me tell you a story about the adventures of the elven mage frieren and her band of heros
 """
 
+def main():
+  
+  params = {
+    "dim": 2048,
+    "n_layers": 16,
+    "n_heads": 32,
+    "n_kv_heads": 8,
+    "n_words": 128256,
+    "ffn_dim_multiplier": 1.5,
+    "multiple_of": 256,
+    "norm_eps": 1e-05,
+    "rope_theta": 500000.0,
+    "scale_factor": 8,
+    "low_freq_factor": 1,
+    "high_freq_factor": 4,
+    "old_context_len": 8192,
+    "use_scaled_rope": True,
+    "max_seq_len": 4096
+  }
+  
+  LLAMA_1B_ROPE = RopeParams(
+    rope_theta=params["rope_theta"],
+    use_scaled_rope=params["use_scaled_rope"],
+    scale_factor=params["scale_factor"],
+    low_freq_factor=params["low_freq_factor"],
+    high_freq_factor=params["high_freq_factor"],
+    old_context_len=params["old_context_len"]
+  )
+
+  LLAMA_1B_PARAMS = ModelParams(
+    n_layers=params["n_layers"],
+    n_local_heads=params["n_heads"],
+    n_local_kv_heads=params["n_kv_heads"],
+    head_dim=params["dim"] // params["n_heads"],
+    max_seq_len=params["max_seq_len"],
+    rope_params=LLAMA_1B_ROPE,
+    d_model=params["dim"]
+  )
+  
 def main():
   
   params = {
@@ -174,6 +217,14 @@ def main():
     base_top_k=27
   )
   
+  sampler_params = SamplerParams(
+    stop_tokens=jnp.load('data/STEER_TOKENS.npy'),
+    steer_tokens=jnp.array([128001, 128008, 128009]),
+    base_temp=0.666,
+    base_top_p=0.90,
+    base_top_k=27
+  )
+  
   raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
   raw_tokens2 = tokenizer.encode(prompt2, bos=False, eos=False, allowed_special='all')
   raw_tokens3 = tokenizer.encode(prompt3, bos=False, eos=False, allowed_special='all')
@@ -188,14 +239,18 @@ def main():
 
   print(prompt)
   generate(xfmr_weights, model_params, sampler_params, tokenizer, raw_tokens1)
+  generate(xfmr_weights, model_params, sampler_params, tokenizer, raw_tokens1)
   print('\n')
   print(prompt2)
+  generate(xfmr_weights, model_params, sampler_params, tokenizer, raw_tokens2)
   generate(xfmr_weights, model_params, sampler_params, tokenizer, raw_tokens2)
   print('\n')
   print(prompt3)
   generate(xfmr_weights, model_params, sampler_params, tokenizer, raw_tokens3)
+  generate(xfmr_weights, model_params, sampler_params, tokenizer, raw_tokens3)
   print('\n')
   print(prompt4)
+  generate(xfmr_weights, model_params, sampler_params, tokenizer, raw_tokens4)
   generate(xfmr_weights, model_params, sampler_params, tokenizer, raw_tokens4)
   print('\n')
 
