@@ -1,10 +1,7 @@
-from typing import NamedTuple
 from dataclasses import dataclass
 from entropix.model import KVCache
-import math
 import jax
 import jax.numpy as jnp
-from entropix.model import ModelParams
 
 @dataclass
 class LMState:
