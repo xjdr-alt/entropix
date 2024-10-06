@@ -17,6 +17,8 @@ from entropix.torch_weights import XfmrWeights, LayerWeights, load_weights
 from entropix.torch_sampler import sample
 from entropix.prompts import prompt, bp1
 
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 
 def apply_scaling(freqs: torch.Tensor):
     # Values obtained from grid search
@@ -52,7 +54,7 @@ def precompute_freqs_cis(
         freqs = apply_scaling(freqs)
     freqs = torch.outer(t, freqs)
     freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
-    return freqs_cis
+    return freqs_cis.to(DEVICE)
 
 
 def build_attn_mask(seqlen: int, start_pos: int) -> torch.Tensor:
@@ -61,7 +63,7 @@ def build_attn_mask(seqlen: int, start_pos: int) -> torch.Tensor:
       mask = torch.full((seqlen, seqlen), float("-inf"))
       mask = torch.triu(mask, diagonal=1)
       mask = torch.hstack([torch.zeros((seqlen, start_pos)), mask]).to(torch.bfloat16)
-  return mask
+  return mask.to(DEVICE)
 
 
 def main():
@@ -82,7 +84,7 @@ def main():
       bsz, seqlen = tokens.shape
       attn_mask = build_attn_mask(seqlen, cur_pos)
       freqs_cis = precompute_freqs_cis(model_params.head_dim, model_params.max_seq_len, model_params.rope_theta, model_params.use_scaled_rope)
-      kvcache = KVCache.new(model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim)
+      kvcache = KVCache.new(model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim).to(DEVICE)
       logits, kvcache, _, _ = xfmr(xfmr_weights, model_params, tokens, cur_pos, freqs_cis[:seqlen], kvcache, attn_mask=attn_mask)
       next_token = torch.argmax(logits[:, -1], dim=-1, keepdim=True).to(torch.long)
       gen_tokens = next_token
