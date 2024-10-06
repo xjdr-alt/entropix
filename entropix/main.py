@@ -1,23 +1,19 @@
-from typing import NamedTuple, Optional, Tuple
+import math
+from pathlib import Path
 
 import jax
 import jax.numpy as jnp
-
-import math
 import tyro
-
-
-from pathlib import Path
-from functools import partial
 
 from entropix.config import LLAMA_1B_PARAMS
 from entropix.kvcache import KVCache
 from entropix.model import xfmr
-from entropix.prompts import prompt, bp1
-from entropix.sampler import sample
+from entropix.prompts import bp1, prompt
+from entropix.sampler import SamplerConfig, sample
 from entropix.tokenizer import Tokenizer
 from entropix.weights import load_weights
 
+DEFAULT_WEIGHTS_PATH = Path(__file__).parent / 'weights'
 
 def apply_scaling(freqs: jax.Array):
   SCALE_FACTOR = 8
@@ -63,9 +59,9 @@ def build_attn_mask(seqlen: int, start_pos: int) -> jax.Array:
   return mask
 
 
-def main():
+def main(weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('1B-Instruct')):
   model_params = LLAMA_1B_PARAMS
-  xfmr_weights = load_weights()
+  xfmr_weights = load_weights(weights_path.absolute())
 
   tokenizer = Tokenizer('entropix/tokenizer.model')
   raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
@@ -86,11 +82,11 @@ def main():
     print(tokenizer.decode([next_token.item()]), end='', flush=True)
     cur_pos = seqlen
     stop = jnp.array([128001, 128008, 128009])
-    #stop = jnp.array(tokenizer.stop_tokens)
+    sampler_cfg = SamplerConfig()
     while cur_pos < 8192:
       cur_pos += 1
       logits, kvcache, scores, stats = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache)
-      next_token = sample(gen_tokens, logits, scores)
+      next_token = sample(gen_tokens, logits, scores, cfg=sampler_cfg)
       gen_tokens = jnp.concatenate((gen_tokens, next_token))
       print(tokenizer.decode(next_token.tolist()[0]), end='', flush=True)
       if jnp.isin(next_token, stop).any():
