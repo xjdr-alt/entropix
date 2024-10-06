@@ -1,7 +1,7 @@
 from entropix.model import KVCache
 from entropix.rope import precompute_freqs_cis
 from entropix.sampler import sample
-from entropix.LMState import LMState
+from entropix.lm_state import LMState
 from entropix.model import xfmr
 from entropix.sampler import SamplerParams
 from entropix.tokenizer import Tokenizer
@@ -44,5 +44,29 @@ def generate(xfmr_weights, model_params, sampler_params, tokenizer, tokens):
       print(tokenizer.decode(next_token.tolist()[0]), end='', flush=True)
       if jnp.isin(next_token, sampler_params.stop_tokens).any():
         break
+
+def generate(xfmr_weights, model_params, tokenizer, tokens):
+  gen_tokens = None
+  cur_pos = 0
+  tokens = jnp.array([tokens], jnp.int32)
+  bsz, seqlen = tokens.shape
+  attn_mask = build_attn_mask(seqlen, cur_pos)
+  freqs_cis = precompute_freqs_cis(model_params.head_dim, model_params.max_seq_len, model_params.rope_theta, model_params.use_scaled_rope)
+  kvcache = KVCache.new(model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim)
+  logits, kvcache, _, _ = xfmr(xfmr_weights, model_params, tokens, cur_pos, freqs_cis[:seqlen], kvcache, attn_mask=attn_mask)
+  next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
+  gen_tokens = next_token
+  print(tokenizer.decode([next_token.item()]), end='', flush=True)
+  cur_pos = seqlen
+  stop = jnp.array([128001, 128008, 128009])
+  #stop = jnp.array(tokenizer.stop_tokens)
+  while cur_pos < 8192:
+    cur_pos += 1
+    logits, kvcache, scores, stats = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache)
+    next_token = sample(gen_tokens, logits, scores)
+    gen_tokens = jnp.concatenate((gen_tokens, next_token))
+    print(tokenizer.decode(next_token.tolist()[0]), end='', flush=True)
+    if jnp.isin(next_token, stop).any():
+      break
 
 

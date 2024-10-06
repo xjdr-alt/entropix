@@ -2,8 +2,9 @@ from typing import NamedTuple
 import jax
 
 class RopeParams(NamedTuple):
-  rope_theta: float
   use_scaled_rope: bool
+  theta: float
+  dim: int
   scale_factor: int # = 8
   low_freq_factor: int # = 1
   high_freq_factor: int # = 4
@@ -16,7 +17,6 @@ class ModelParams(NamedTuple):
   head_dim: int
   max_seq_len: int
   rope_params: RopeParams
-  d_model: int
 
 class SamplerParams(NamedTuple):
     steer_tokens: jax.Array
