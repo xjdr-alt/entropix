@@ -90,7 +90,7 @@ def xfmr(xfmr_weights: XfmrWeights, model_params: ModelParams, lm_state: LMState
       layer_head_ent, layer_head_vent=layer_head_ent.at[:, layer_idx, :].set(head_ent[:,:,-1]), layer_head_vent.at[:, layer_idx, :].set(head_vent[:,:,-1])
       h = h + h_attn
       h = h + feed_forward(rms_norm(h, xfmr_weights.layer_weights[layer_idx].ffn_norm), xfmr_weights.layer_weights[layer_idx])
-
+      
   # lm_state = lm_state.update_attn_stats(scores, layer_idx)
   logits = jnp.dot(rms_norm(h, xfmr_weights.norm), xfmr_weights.output.T)
   return logits, kvcache, lm_state, scores

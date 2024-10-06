@@ -5,7 +5,7 @@ import tyro
 from entropix.config import LLAMA_1B_PARAMS
 from entropix.lm_state import LMState
 from entropix.model import xfmr
-from entropix.prompts import prompt3 as prompt
+from entropix.prompts import prompt3 as bp4
 from entropix.sampler import sample, SamplerParams
 from entropix.tokenizer import Tokenizer
 from entropix.weights import load_weights
@@ -25,8 +25,8 @@ def main():
   model_params = LLAMA_1B_PARAMS
   xfmr_weights = load_weights()
   tokenizer = Tokenizer("entropix/tokenizer.model")
-  raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
-  # base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False, allowed_special='all')
+  # raw_tokens1 = tokenizer.encode(bp4,  bos=False, eos=False, allowed_special='all')
+  base_raw_tokens1 = tokenizer.encode(bp4, bos=True, eos=False, allowed_special='all')
   sampler_params = SamplerParams(
     steer_tokens=jnp.load('data/STEER_TOKENS.npy'),
     temp=0.66,
@@ -56,7 +56,7 @@ def main():
         break
 
 
-  generate(xfmr_weights, model_params, sampler_params, raw_tokens1, 1000)
+  generate(xfmr_weights, model_params, sampler_params, base_raw_tokens1, 1000)
 
 if __name__ == '__main__':
   tyro.cli(main)
