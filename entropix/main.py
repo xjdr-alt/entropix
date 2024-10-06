@@ -1,6 +1,12 @@
 import jax
 import jax.numpy as jnp
 import tyro
+
+from entropix.stats import AttnStats
+
+from pathlib import Path
+from functools import partial
+
 from entropix.config import LLAMA_1B_PARAMS
 from entropix.lm_state import LMState
 from entropix.model import xfmr
@@ -25,6 +31,25 @@ def main():
   xfmr_weights = load_weights()
 
   tokenizer = Tokenizer('entropix/tokenizer.model')
+<<<<<<< HEAD
+  sampler_params = SamplerParams(
+    stop_tokens=jnp.load('data/STEER_TOKENS.npy'),
+    steer_tokens=jnp.array([128001, 128008, 128009]),
+    base_temp=0.666,
+    base_top_p=0.90,
+    base_top_k=27
+  )
+  
+  sampler_params = SamplerParams(
+    stop_tokens=jnp.load('data/STEER_TOKENS.npy'),
+    steer_tokens=jnp.array([128001, 128008, 128009]),
+    base_temp=0.666,
+    base_top_p=0.90,
+    base_top_k=27
+  )
+  
+=======
+>>>>>>> origin/main
   raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
   # base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False, allowed_special='all')
   sampler_params = SamplerParams(
