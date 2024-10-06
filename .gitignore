@@ -144,3 +144,6 @@ dmypy.json
 **/.DS_Store
 
 *.swp
+
+#tiktoken model file
+entropix/tokenizer.model
