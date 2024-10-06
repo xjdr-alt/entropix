@@ -1,3 +1,5 @@
+import jax.numpy as jnp
+import numpy as np
 from entropix.model import xfmr
 from entropix.config import ModelParams, RopeParams
 from entropix.rope import precompute_freqs_cis
@@ -5,106 +7,270 @@ from entropix.kvcache import KVCache
 from entropix.generator import build_attn_mask
 from entropix.weights import load_weights
 from entropix.tokenizer import Tokenizer
-import jax.numpy as jnp
-import matplotlib.pyplot as plt
-import numpy as np
 from entropix.lm_state import LMState
 import argparse
+from rich.console import Console
+from rich.text import Text
+import colorsys
 
-# tokenize the text to a token sequence
-# run the token sequence through the model to get the attention entropy scores
-# compute atten_entropy = attn_stats.entropy.sum(axis=-1).reshape(-1, attn_stats.entropy.shape[-2] * attn_stats.entropy.shape[-1]) # of shape (bsz, seq_len * n_layers)
-# compute the short time fourier transform of atten_entropy
-# display the text and above it the fourier transform such that each window is scaled to evenly fit within the width of the text, i.e. the number of characters in the text
-
-def compute_stft(array, window_size):
+def compute_stft_custom(entropy_array, window_size=64, step_size=16):
     """
-    Computes the Short-Time Fourier Transform (STFT) of the input array.
+    Computes the Short-Time Fourier Transform (STFT) using a Hamming window.
 
     Parameters:
-    - array (jax.numpy.ndarray): The input array of float32 values.
-    - window_size (int): The window size for the STFT.
-    """
-    f, t, Zxx = compute_stft(array, window_size)
-    magnitude = np.abs(Zxx)
-    return np.stft(array, window='hann', nperseg=window_size, noverlap=window_size//2)
+    - entropy_array (numpy.ndarray): 1D array of aggregated attention entropy values per token.
+    - window_size (int): Size of each window for FFT.
+    - step_size (int): Step size between consecutive windows.
 
-def plot_stft_with_text(text, array, n_layers ,window_factor: float = 8):
+    Returns:
+    - stft_matrix (numpy.ndarray): 2D array of FFT magnitudes (frequency bins x time windows).
+    - x_values_stft (numpy.ndarray): 1D array representing the center index of each window.
     """
-    Plots the Short-Time Fourier Transform (STFT) of the input array
-    above the given string, aligning characters with the plot's x-axis.
+    window_fn = np.hamming(window_size)
+    stft_magnitudes = []
+    x_values_stft = []
+
+    for i in range(0, len(entropy_array) - window_size + 1, step_size):
+        window = entropy_array[i:i + window_size]
+        windowed = window * window_fn
+        fft_result = np.fft.fft(windowed)
+        magnitudes = np.abs(fft_result)[:window_size // 2]  # Take positive frequencies
+        stft_magnitudes.append(magnitudes)
+        # Center index of the window
+        x_center = i + window_size // 2
+        x_values_stft.append(x_center)
+
+    stft_matrix = np.array(stft_magnitudes).T  # Shape: (frequency_bins, time_windows)
+    x_values_stft = np.array(x_values_stft)
+    return stft_matrix, x_values_stft
+
+def compute_spectral_centroid(stft_matrix):
+    """
+    Computes the spectral centroid for each time window in the STFT matrix.
 
     Parameters:
-    - string (str): The string to display.
-    - array (jax.numpy.ndarray): The input array of float32 values.
-    - window_size (int): The window size for the STFT.
+    - stft_matrix (numpy.ndarray): 2D array of FFT magnitudes (frequency bins x time windows).
+
+    Returns:
+    - spectral_centroids (numpy.ndarray): 1D array of spectral centroid values per window.
     """
-    # Convert JAX array to NumPy
-    array_np = np.array(array)
-    # Compute STFT with window size proportional to number of layers
-    window_size = window_factor * n_layers
-    time, freq, magnitude = compute_stft(array, window_size)
+    frequency_bins, time_windows = stft_matrix.shape
+    # Normalize frequency indices to [0, 1]
+    f = np.linspace(0, 1, frequency_bins)
+    # Avoid division by zero
+    magnitude_sums = stft_matrix.sum(axis=0)
+    spectral_centroids = np.zeros(time_windows)
+    nonzero = magnitude_sums > 0
+    spectral_centroids[nonzero] = np.sum(f[:, np.newaxis] * stft_matrix[:, nonzero], axis=0) / magnitude_sums[nonzero]
+    return spectral_centroids
 
-    # Determine alignment parameters
-    N = len(text)        # Number of characters
-    L = len(array_np)      # Number of samples
-    K = L / N              # Samples per character
+def map_centroid_to_color(centroids):
+    """
+    Maps normalized spectral centroid values to hexadecimal RGB colors.
 
-    # Generate x-axis for STFT plot aligned to number of characters
-    time_axis = np.linspace(0, N, len(time))
+    Parameters:
+    - centroids (numpy.ndarray): 1D array of spectral centroid values normalized between 0 and 1.
 
-    # Create the plot
-    fig, (ax_stft, ax_text) = plt.subplots(2, 1, figsize=(12, 6),
-                                          gridspec_kw={'height_ratios': [3, 1]},
-                                          sharex=True)
+    Returns:
+    - colors (list of str): List of hexadecimal color codes.
+    """
+    colors = []
+    for c in centroids:
+        # Ensure centroid is within [0, 1]
+        c = np.clip(c, 0, 1)
+        # Map centroid to hue (0-360 degrees)
+        hue = c * 360  # 0 to 360
+        saturation = 1.0  # Full saturation
+        value = 1.0  # Full brightness
+        # Convert HSV to RGB
+        rgb = colorsys.hsv_to_rgb(hue / 360, saturation, value)
+        # Convert RGB to hexadecimal
+        hex_color = '#{:02x}{:02x}{:02x}'.format(int(rgb[0]*255), int(rgb[1]*255), int(rgb[2]*255))
+        colors.append(hex_color)
+    return colors
 
-    # Plot STFT magnitude
-    im = ax_stft.pcolormesh(time_axis, f, magnitude, shading='gouraud')
-    ax_stft.set_ylabel('Frequency [Hz]')
-    ax_stft.set_title('Short-Time Fourier Transform')
+def interpolate_centroids(spectral_centroids, num_chars):
+    """
+    Interpolates spectral centroid values to match the number of characters.
 
-    fig.colorbar(im, ax=ax_stft, format='%+2.0f dB')
+    Parameters:
+    - spectral_centroids (numpy.ndarray): 1D array of spectral centroid values per window.
+    - num_chars (int): Total number of characters in the text.
 
-    # Configure x-axis to represent characters
-    ax_stft.set_xlim(0, N)
-    ax_stft.set_xticks(np.arange(N) + 0.5)
-    ax_stft.set_xticklabels([])  # Hide x-tick labels on STFT plot
+    Returns:
+    - interpolated_centroids (numpy.ndarray): 1D array of spectral centroid values per character.
+    """
+    time_windows = len(spectral_centroids)
+    if time_windows == 0:
+        return np.zeros(num_chars)
+    
+    # Positions of spectral centroids in character indices
+    centroid_positions = np.linspace(0, num_chars - 1, time_windows)
+    
+    # Character positions
+    char_positions = np.arange(num_chars)
+    
+    # Interpolate
+    interpolated_centroids = np.interp(char_positions, centroid_positions, spectral_centroids)
+    
+    return interpolated_centroids
 
-    # Prepare text for the lower axis
-    ax_text.axis('off')  # Hide the axis
+def assign_colors_to_tokens(interpolated_centroids):
+    """
+    Assigns colors to each character based on interpolated spectral centroid values.
 
-    # Calculate character positions
-    char_positions = np.linspace(0, N, len(text) + 1)
-    for i, char in enumerate(text):
-        # Position each character in the center of its segment
-        ax_text.text((char_positions[i] + char_positions[i+1])/2, 0.5, char,
-                     horizontalalignment='center',
-                     verticalalignment='center',
-                     fontsize=12)
+    Parameters:
+    - interpolated_centroids (numpy.ndarray): 1D array of spectral centroid values per character.
 
-    plt.tight_layout()
-    plt.show()
+    Returns:
+    - token_colors (list of str): List of hexadecimal color codes corresponding to each character.
+    """
+    # Normalize the interpolated centroids to [0, 1]
+    min_val = interpolated_centroids.min()
+    max_val = interpolated_centroids.max()
+    if max_val - min_val == 0:
+        normalized_centroids = np.zeros_like(interpolated_centroids)
+    else:
+        normalized_centroids = (interpolated_centroids - min_val) / (max_val - min_val)
+    
+    # Debugging: Print min and max after normalization
+    print(f"Normalized Centroids Min: {normalized_centroids.min()}, Max: {normalized_centroids.max()}, Mean: {normalized_centroids.mean()}, Std: {normalized_centroids.std()}")
+    
+    # Map normalized values to colors
+    colors = map_centroid_to_color(normalized_centroids)
+    
+    return colors
+
+def create_colored_text(text, token_colors):
+    """
+    Creates colored text using the Rich library based on token_colors.
+
+    Parameters:
+    - text (str): The input text.
+    - token_colors (list of str): List of hexadecimal color codes corresponding to each character.
+    """
+    console = Console()
+    colored_text = Text()
+
+    for idx, char in enumerate(text):
+        color = token_colors[idx] if idx < len(token_colors) else '#FFFFFF'  # Default to white
+        # Apply the color as a style
+        colored_text.append(char, style=f"color({color})")
+
+    console.print(colored_text)
 
 def analyze_atten_entropy(xfmr_weights, model_params, tokenizer, text):
-  tokens = tokenizer.encode(text,  bos=False, eos=False, allowed_special='all')
-  tokens = np.array([tokens])
-  seqlen = tokens.shape[-1]
-  n_words = tokenizer.n_words
-  lm_state = LMState(
-      prompt=tokens,
-      logits=jnp.zeros((1, n_words), dtype=jnp.bfloat16),
-      freqs_cis=precompute_freqs_cis(head_dim=model_params.head_dim, max_seq_len=model_params.max_seq_len, rope_params=model_params.rope_params),
-      kvcache=KVCache.new(model_params.n_layers, 1, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim),
-      attn_mask=build_attn_mask(seqlen, 0),
-      gen_tokens=jnp.zeros((1, 0), dtype=jnp.int32),
-      state=jnp.zeros((1, 1), dtype=jnp.int32),
-      pos=0
+    """
+    Analyzes attention entropy and visualizes it by coloring text characters based on STFT spectral centroid values.
+
+    Parameters:
+    - xfmr_weights: Transformer model weights.
+    - model_params: Model parameters.
+    - tokenizer: Tokenizer instance.
+    - text (str): The input text to analyze.
+    """
+    tokens = tokenizer.encode(text, bos=False, eos=False, allowed_special='all')
+    tokens = np.array([tokens])
+    seqlen = tokens.shape[-1]
+    n_words = tokenizer.n_words
+    lm_state = LMState(
+        prompt=tokens,
+        logits=jnp.zeros((1, n_words), dtype=jnp.bfloat16),
+        freqs_cis=precompute_freqs_cis(
+            head_dim=model_params.head_dim,
+            max_seq_len=model_params.max_seq_len,
+            rope_params=model_params.rope_params
+        ),
+        kvcache=KVCache.new(
+            model_params.n_layers,
+            1,
+            model_params.max_seq_len,
+            model_params.n_local_kv_heads,
+            model_params.head_dim
+        ),
+        attn_mask=build_attn_mask(seqlen, 0),
+        gen_tokens=jnp.zeros((1, 0), dtype=jnp.int32),
+        state=jnp.zeros((1, 1), dtype=jnp.int32),
+        pos=0
     )
-  _, _, attn_stats  = xfmr(xfmr_weights, model_params, lm_state.prompt, lm_state.pos, freqs_cis=lm_state.freqs_cis[:seqlen], kvcache=lm_state.kvcache, attn_mask=lm_state.attn_mask)
-  attn_entropy = attn_stats.entropy.sum(axis=-1).reshape(1, seqlen, -1)
-  plot_stft_with_text(text, attn_entropy, 10)
-    
-def load_model(tokenizer_path, params= {
+    _, _, attn_stats = xfmr(
+        xfmr_weights,
+        model_params,
+        lm_state.prompt,
+        lm_state.pos,
+        freqs_cis=lm_state.freqs_cis[:seqlen],
+        kvcache=lm_state.kvcache,
+        attn_mask=lm_state.attn_mask
+    )
+
+    # Debugging: Check the shape of attn_stats.entropy
+    print(f"Original Attention Entropy Shape: {attn_stats.entropy.shape}")
+
+    # Aggregate attention entropy into a 1D array per token by summing across heads and layers
+    if attn_stats.entropy.ndim == 4:
+        # Sum over heads and layers to get per-token entropy
+        attn_entropy = attn_stats.entropy.sum(axis=(2, 3)).reshape(-1)  # Shape: (batch * seq_len,)
+    elif attn_stats.entropy.ndim == 3:
+        # Sum over heads to get per-token entropy
+        attn_entropy = attn_stats.entropy.sum(axis=2).reshape(-1)  # Shape: (batch * seq_len,)
+    else:
+        raise ValueError(f"Unexpected entropy array shape: {attn_stats.entropy.shape}")
+
+    # Convert from JAX array to NumPy
+    attn_entropy = np.array(attn_entropy)
+
+    # Debugging: Check the length and statistics of attn_entropy
+    print(f"Aggregated Attention Entropy Shape: {attn_entropy.shape}")
+    print(f"Attention Entropy Min: {attn_entropy.min()}, Max: {attn_entropy.max()}, Mean: {attn_entropy.mean()}, Std: {attn_entropy.std()}")
+
+    # Check variance to ensure meaningful spectral analysis
+    if attn_entropy.std() < 1e-6:
+        print("Attention entropy has very low variance. Applying scaling to enhance variation.")
+        # Apply logarithmic scaling to increase variance
+        attn_entropy = np.log(attn_entropy + 1e-6)
+        print(f"After Log Scaling - Min: {attn_entropy.min()}, Max: {attn_entropy.max()}, Mean: {attn_entropy.mean()}, Std: {attn_entropy.std()}")
+
+    # Verify variance after scaling
+    print(f"Post-Scaling Attention Entropy Min: {attn_entropy.min()}, Max: {attn_entropy.max()}, Mean: {attn_entropy.mean()}, Std: {attn_entropy.std()}")
+
+    # Compute STFT using adjusted window_size and step_size for finer resolution
+    window_size = 64   # Smaller window size for finer spectral analysis
+    step_size = 16     # Smaller step size for increased overlap and smoother transitions
+    stft_matrix, x_values_stft = compute_stft_custom(attn_entropy, window_size, step_size)
+
+    # Debugging: Check the shape of stft_matrix and x_values_stft
+    print(f"STFT Matrix Shape: {stft_matrix.shape}")       # (frequency_bins, time_windows)
+    print(f"X Values STFT Shape: {x_values_stft.shape}") # (time_windows,)
+
+    if stft_matrix.size == 0:
+        print("No STFT magnitudes computed. Check window_size and step_size.")
+        return
+
+    # Compute spectral centroid for each window
+    spectral_centroids = compute_spectral_centroid(stft_matrix)
+
+    # Debugging: Check spectral centroids
+    print(f"Spectral Centroids: {spectral_centroids}")
+    print(f"Spectral Centroids Min: {spectral_centroids.min()}, Max: {spectral_centroids.max()}, Mean: {spectral_centroids.mean()}, Std: {spectral_centroids.std()}")
+
+    # Interpolate spectral centroids to match the number of characters
+    num_chars = len(text)
+    interpolated_centroids = interpolate_centroids(spectral_centroids, num_chars)
+
+    # Debugging: Check interpolated centroids
+    print(f"Interpolated Spectral Centroids Shape: {interpolated_centroids.shape}")
+    print(f"Interpolated Centroids Sample: {interpolated_centroids[:10]}")  # Show first 10 for brevity
+
+    # Assign colors to tokens based on interpolated spectral centroids
+    token_colors = assign_colors_to_tokens(interpolated_centroids)
+
+    # Debugging: Check a sample of assigned colors
+    print(f"Assigned Colors Sample: {token_colors[:10]}")  # Show first 10 for brevity
+
+    # Create and display the colored text
+    create_colored_text(text, token_colors)
+
+def load_model(tokenizer_path, params={
     "dim": 2048,
     "n_layers": 16,
     "n_heads": 32,
@@ -120,38 +286,68 @@ def load_model(tokenizer_path, params= {
     "old_context_len": 8192,
     "use_scaled_rope": True,
     "max_seq_len": 4096
-  }
-  ):
+}):
+    """
+    Loads the transformer model, tokenizer, and weights.
 
-  LLAMA_1B_ROPE = RopeParams(
-    rope_theta=params["rope_theta"],
-    use_scaled_rope=params["use_scaled_rope"],
-    scale_factor=params["scale_factor"],
-    low_freq_factor=params["low_freq_factor"],
-    high_freq_factor=params["high_freq_factor"],
-    old_context_len=params["old_context_len"]
-  )
-  LLAMA_1B_PARAMS = ModelParams(
-    n_layers=params["n_layers"],
-    n_local_heads=params["n_heads"],
-    n_local_kv_heads=params["n_kv_heads"],
-    head_dim=params["dim"] // params["n_heads"],
-    max_seq_len=params["max_seq_len"],
-    rope_params=LLAMA_1B_ROPE,
-    d_model=params["dim"]
-  )
-  model_params = LLAMA_1B_PARAMS
-  tokenizer = Tokenizer(model_path=tokenizer_path)
-  xfmr_weights = load_weights()
-  return xfmr_weights, model_params, tokenizer
+    Parameters:
+    - tokenizer_path (str): Path to the tokenizer model.
+    - params (dict): Model parameters.
+
+    Returns:
+    - xfmr_weights: Transformer model weights.
+    - model_params: Model parameters.
+    - tokenizer: Tokenizer instance.
+    """
+    LLAMA_1B_ROPE = RopeParams(
+        rope_theta=params["rope_theta"],
+        use_scaled_rope=params["use_scaled_rope"],
+        scale_factor=params["scale_factor"],
+        low_freq_factor=params["low_freq_factor"],
+        high_freq_factor=params["high_freq_factor"],
+        old_context_len=params["old_context_len"]
+    )
+    LLAMA_1B_PARAMS = ModelParams(
+        n_layers=params["n_layers"],
+        n_local_heads=params["n_heads"],
+        n_local_kv_heads=params["n_kv_heads"],
+        head_dim=params["dim"] // params["n_heads"],
+        max_seq_len=params["max_seq_len"],
+        rope_params=LLAMA_1B_ROPE,
+        d_model=params["dim"]
+    )
+    model_params = LLAMA_1B_PARAMS
+    tokenizer = Tokenizer(model_path=tokenizer_path)
+    xfmr_weights = load_weights()
+    return xfmr_weights, model_params, tokenizer
+
+def main():
+    parser = argparse.ArgumentParser(description="Analyze and visualize attention entropy by coloring text characters based on STFT spectral centroid values.")
+    parser.add_argument("txt_file", help="Path to the .txt file to analyze")
+    args = parser.parse_args()
+
+    # Load the model
+    tokenizer_path = "./entropix/tokenizer.model"  # Update this path if necessary
+    try:
+        xfmr_weights, model_params, tokenizer = load_model(tokenizer_path)
+    except Exception as e:
+        print(f"Error loading the model: {e}")
+        return
+
+    # Read the text file
+    try:
+        with open(args.txt_file, 'r') as file:
+            text = file.read().strip()
+    except Exception as e:
+        print(f"Error reading the text file: {e}")
+        return
+
+    if not text:
+        print("The input text file is empty. Please provide valid text.")
+        return
+
+    # Analyze attention entropy and visualize
+    analyze_atten_entropy(xfmr_weights, model_params, tokenizer, text)
 
 if __name__ == "__main__":
-  parser = argparse.ArgumentParser()
-  parser.add_argument("txt_file", help="Path to the .txt file to analyze")
-  args = parser.parse_args()
-  xfmr_weights, model_params, tokenizer = load_model("./entropix/tokenizer.model")
-
-  with open(args.txt_file, 'r') as file:
-    text = file.read()
-  
-  analyze_atten_entropy(xfmr_weights, model_params, tokenizer, text)
+    main()

@@ -27,5 +27,4 @@ class AttnStats(NamedTuple):
             entropy=self.entropy.at[:, :, layer_idx, :].set(new_entropy),
             varentropy=self.varentropy.at[:, :, layer_idx, :].set(new_varentropy)
         )
-        print(updated_stats.entropy.shape)
         return updated_stats
