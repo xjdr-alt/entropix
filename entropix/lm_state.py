@@ -31,7 +31,7 @@ class LMState(NamedTuple):
     def update_context(self, tokens: jax.Array, logits: jax.Array):
       return self._replace(
          logits=logits,
-         context=self.context.at[:, self.cur_pos].set(tokens[0]), # fix funny shape issue!
+         context=self.context.at[:, self.cur_pos].set(tokens), # fix funny shape issue!
          cur_pos=self.cur_pos + 1,
       )
 
@@ -40,18 +40,21 @@ class LMState(NamedTuple):
       probs = jax.nn.softmax(scores[:self.cur_pos+1], axis=-1)
       logprobs = jax.nn.log_softmax(scores[: self.cur_pos+1], axis=-1)
       entropy = -jnp.sum(probs * logprobs, axis=-1)
-      varentropy = jnp.sum(jnp.where(probs > 0, probs * (entropy[...,None] + logprobs)**2 , 0), axis=-1)
-      entropy, varentropy = entropy.transpose(0,2,1), varentropy.transpose(0,2,1)
-      if self.cur_pos == self.start_pos:
+      varentropy = jnp.sum(jnp.where(probs > 0, probs * (entropy[..., None] + logprobs)**2 , 0), axis=-1)
+      if self.initial_pass:
          return self._replace(
-            head_ent=self.head_ent.at[:, :self.start_pos, layer_idx, :].set(entropy),
-            head_vent=self.head_vent.at[:, :self.start_pos, layer_idx, :].set(varentropy)
-         )
+            head_ent=self.head_ent.at[:, :self.start_pos, layer_idx, :].set(entropy.transpose(0,2,1)),
+            head_vent=self.head_vent.at[:, :self.start_pos, layer_idx, :].set(varentropy.transpose(0,2,1))
+         )         
       else:
         return self._replace(
           head_ent=self.head_ent.at[:, self.cur_pos, layer_idx, :].set(entropy[:,self.cur_pos]),
           head_vent=self.head_vent.at[:,  self.cur_pos, layer_idx, :].set(varentropy[:,self.cur_pos])
         )
+      
+    @property
+    def initial_pass(self):
+       return self.cur_pos==self.start_pos
     
     @property
     def prompt(self) -> jnp.ndarray:

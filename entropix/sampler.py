@@ -5,6 +5,7 @@ from entropix.utils import multinomial_sample_one, calculate_varentropy_logsoftm
 from typing import NamedTuple
 
 class SamplerParams(NamedTuple):
+    steer_tokens: jax.Array
     temp: float
     top_p: float
     min_p: float

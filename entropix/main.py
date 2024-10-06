@@ -2,19 +2,13 @@ import jax
 import jax.numpy as jnp
 import tyro
 
-from entropix.stats import AttnStats
-
-from pathlib import Path
-from functools import partial
-
 from entropix.config import LLAMA_1B_PARAMS
 from entropix.lm_state import LMState
 from entropix.model import xfmr
-from entropix.prompts import prompt3 as prompt
+from entropix.prompts import prompt4 as prompt
 from entropix.sampler import sample, SamplerParams
 from entropix.tokenizer import Tokenizer
 from entropix.weights import load_weights
-from entropix.rope import precompute_freqs_cis
 from entropix.kvcache import KVCache
 
 
@@ -30,33 +24,15 @@ def main():
   model_params = LLAMA_1B_PARAMS
   xfmr_weights = load_weights()
 
-  tokenizer = Tokenizer('entropix/tokenizer.model')
-<<<<<<< HEAD
-  sampler_params = SamplerParams(
-    stop_tokens=jnp.load('data/STEER_TOKENS.npy'),
-    steer_tokens=jnp.array([128001, 128008, 128009]),
-    base_temp=0.666,
-    base_top_p=0.90,
-    base_top_k=27
-  )
-  
-  sampler_params = SamplerParams(
-    stop_tokens=jnp.load('data/STEER_TOKENS.npy'),
-    steer_tokens=jnp.array([128001, 128008, 128009]),
-    base_temp=0.666,
-    base_top_p=0.90,
-    base_top_k=27
-  )
-  
-=======
->>>>>>> origin/main
+  tokenizer = Tokenizer("entropix/tokenizer.model")
   raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
   # base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False, allowed_special='all')
   sampler_params = SamplerParams(
+    steer_tokens=jnp.load('data/STEER_TOKENS.npy'),
     temp=0.66,
     top_k=40,
     top_p=0.9,
-    min_p=0.03 # turn down to 0.01 to reduce shoggoth symptoms
+    min_p=0.01 # turn down to 0.01 to reduce shoggoth symptoms
   )
   # Create the batch of tokens
   def generate(xfmr_weights, model_params, sampler_params, tokens, gen_len):
@@ -74,9 +50,11 @@ def main():
     #stop = jnp.array(tokenizer.stop_tokens)
     while lm_state.cur_pos < prompt_len + gen_len:
       logits, kvcache, lm_state, scores = xfmr(xfmr_weights, model_params, lm_state, kvcache)
-      next_token = sample(sampler_params, lm_state.context[:,lm_state.cur_pos], logits, scores)
-      lm_state = lm_state.update_context(next_token, logits)
-      print(tokenizer.decode(next_token.tolist()[0]), end='', flush=True)
+      next_token = sample(sampler_params, lm_state.context[:,lm_state.cur_pos], logits, scores)[...,-1]
+      # next_token = jnp.sample(logits[:, -1], axis=-1).astype(jnp.int32)
+      assert len(next_token.shape) == 1
+      lm_state = lm_state.update_context(next_token, logits[:,-1,:])
+      print(tokenizer.decode(next_token.tolist()), end='', flush=True)
       if jnp.isin(next_token, stop).any():
         break
 
