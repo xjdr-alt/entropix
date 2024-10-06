@@ -29,11 +29,17 @@ class LMState(NamedTuple):
       )
         
     def update_context(self, tokens: jax.Array, logits: jax.Array):
-      return self._replace(
-         logits=logits,
-         context=self.context.at[:, self.cur_pos].set(tokens), # fix funny shape issue!
-         cur_pos=self.cur_pos + 1,
-      )
+      if self.initial_pass:
+         return self._replace(
+            logits=logits,
+            context=self.context.at[:, self.cur_pos].set(tokens)
+          )
+      else:
+         return self._replace(
+            logits=logits,
+            context=self.context.at[:, self.cur_pos].set(tokens),
+            cur_pos=self.cur_pos+1
+         )
 
 
     def update_attn_stats(self, scores: jax.Array, layer_idx: int):
@@ -55,7 +61,9 @@ class LMState(NamedTuple):
     @property
     def initial_pass(self):
        return self.cur_pos==self.start_pos
-    
+    @property
+    def rel_pos(self):
+       return self.cur_pos-self.start_pos
     @property
     def prompt(self) -> jnp.ndarray:
         return self.context[:, :self.start_pos]
