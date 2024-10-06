@@ -24,7 +24,7 @@ class LMState(NamedTuple):
           logits=jnp.zeros((bsz, model_params.vocab_size), dtype=jnp.float32),
           head_ent=jnp.zeros((bsz, seqlen, model_params.n_layers, model_params.n_local_heads), dtype=jnp.float32),
           head_vent=jnp.zeros((bsz, seqlen, model_params.n_layers, model_params.n_local_heads), dtype=jnp.float32),
-          cur_pos=prompt_len,
+          cur_pos=0,
           start_pos=prompt_len
       )
         
@@ -32,7 +32,8 @@ class LMState(NamedTuple):
       if self.initial_pass:
          return self._replace(
             logits=logits,
-            context=self.context.at[:, self.cur_pos].set(tokens)
+            context=self.context.at[:, self.cur_pos].set(tokens),
+            cur_pos=self.start_pos
           )
       else:
          return self._replace(
@@ -40,7 +41,6 @@ class LMState(NamedTuple):
             context=self.context.at[:, self.cur_pos].set(tokens),
             cur_pos=self.cur_pos+1
          )
-
 
     def update_attn_stats(self, scores: jax.Array, layer_idx: int):
       probs = jax.nn.softmax(scores[:self.cur_pos+1], axis=-1)
@@ -60,11 +60,16 @@ class LMState(NamedTuple):
       
     @property
     def initial_pass(self):
-       return self.cur_pos==self.start_pos
+       return self.cur_pos < self.start_pos
+    
     @property
     def rel_pos(self):
        return self.cur_pos-self.start_pos
+    
     @property
     def prompt(self) -> jnp.ndarray:
         return self.context[:, :self.start_pos]
 
+    @property
+    def batch_size(self):
+       return self.context.shape[0]

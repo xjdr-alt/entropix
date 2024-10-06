@@ -62,32 +62,32 @@ def feed_forward(x: jax.Array, layer_weights: LayerWeights) -> jax.Array:
 
 
 #@partial(jax.jit, static_argnames=("model_params", "cur_pos"))
-def xfmr_plus(xfmr_weights: XfmrWeights, model_params: ModelParams, lm_state: LMState, kvcache: KVCache, attn_mask: Optional[jax.Array]=None) -> Tuple[jax.Array, KVCache]:
+def xfmr(xfmr_weights: XfmrWeights, model_params: ModelParams, lm_state: LMState, kvcache: KVCache, attn_mask: Optional[jax.Array]=None) -> Tuple[jax.Array, KVCache]:
   freqs_cis = precompute_freqs_cis(model_params)
   
   if lm_state.initial_pass: # on the first pass caching (attention, kv) looks substantially different.
-    seq_layer_head_ent, seq_layer_head_vent = jnp.zeros(lm_state.start_pos, model_params.n_layers,model_params.n_local_heads), jnp.zeros(model_params.n_layers,model_params.n_local_heads)
+    seq_layer_head_ent, seq_layer_head_vent = jnp.zeros((lm_state.batch_size , lm_state.context.shape[1], model_params.n_layers, model_params.n_local_heads),dtype=jnp.float32), jnp.zeros((lm_state.batch_size, lm_state.context.shape[1], model_params.n_layers,model_params.n_local_heads),dtype=jnp.float32)
     freqs_cis = freqs_cis[:lm_state.start_pos]
     h = xfmr_weights.tok_embeddings[lm_state.context[:,:lm_state.start_pos]]
     for layer_idx in range(model_params.n_layers):
       norm_x = rms_norm(h, xfmr_weights.layer_weights[layer_idx].attention_norm)
       h_attn, kvcache, scores = attention(norm_x, xfmr_weights.layer_weights[layer_idx], model_params, 0, layer_idx, freqs_cis, kvcache, attn_mask=attn_mask)
       head_ent, head_vent = calculate_varentropy_logsoftmax(scores)
-      seq_layer_head_ent=seq_layer_head_ent.at[:, :lm_state.start_pos, layer_idx, :].set(head_ent.transpose(0,2,1)),
+      seq_layer_head_ent=seq_layer_head_ent.at[:, :lm_state.start_pos, layer_idx, :].set(head_ent.transpose(0,2,1))
       seq_layer_head_vent=seq_layer_head_vent.at[:, :lm_state.start_pos, layer_idx, :].set(head_vent.transpose(0,2,1))
       h = h + h_attn
       h = h + feed_forward(rms_norm(h, xfmr_weights.layer_weights[layer_idx].ffn_norm), xfmr_weights.layer_weights[layer_idx])
-      
+
   
   else:
-    layer_head_ent, layer_head_vent = jnp.zeros(model_params.n_layers,model_params.n_local_heads), jnp.zeros(model_params.n_layers,model_params.n_local_heads)
+    layer_head_ent, layer_head_vent = jnp.zeros((lm_state.batch_size, model_params.n_layers, model_params.n_local_heads)), jnp.zeros((lm_state.batch_size, model_params.n_layers, model_params.n_local_heads))
     freqs_cis = freqs_cis[lm_state.cur_pos:lm_state.cur_pos+1]
     h = xfmr_weights.tok_embeddings[lm_state.context[:,lm_state.cur_pos:lm_state.cur_pos+1]]
     for layer_idx in range(model_params.n_layers):
       norm_x = rms_norm(h, xfmr_weights.layer_weights[layer_idx].attention_norm)
-      h_attn, kvcache, scores = attention(norm_x, xfmr_weights.layer_weights[layer_idx], model_params, lm_state.cur_pos, layer_idx, freqs_cis, kvcache, attn_mask=attn_mask)
+      h_attn, kvcache, scores = attention(norm_x, xfmr_weights.layer_weights[layer_idx], model_params, lm_state.cur_pos, layer_idx, freqs_cis, kvcache)
       head_ent, head_vent = calculate_varentropy_logsoftmax(scores)
-      layer_head_ent, layer_head_vent=layer_head_ent.at[:, layer_idx, :].set(head_ent), layer_head_vent.at[:, layer_idx, :].set(head_vent)
+      layer_head_ent, layer_head_vent=layer_head_ent.at[:, layer_idx, :].set(head_ent[:,:,-1]), layer_head_vent.at[:, layer_idx, :].set(head_vent[:,:,-1])
       h = h + h_attn
       h = h + feed_forward(rms_norm(h, xfmr_weights.layer_weights[layer_idx].ffn_norm), xfmr_weights.layer_weights[layer_idx])
 

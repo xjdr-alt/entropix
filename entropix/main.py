@@ -5,7 +5,7 @@ import tyro
 from entropix.config import LLAMA_1B_PARAMS
 from entropix.lm_state import LMState
 from entropix.model import xfmr
-from entropix.prompts import prompt4 as prompt
+from entropix.prompts import prompt3 as prompt
 from entropix.sampler import sample, SamplerParams
 from entropix.tokenizer import Tokenizer
 from entropix.weights import load_weights
@@ -39,7 +39,6 @@ def main():
     tokens = jnp.array([tokens], jnp.int32)
     bsz, prompt_len = tokens.shape
     attn_mask = build_attn_mask(prompt_len, 0)
-    print(attn_mask)
     lm_state = LMState.new(model_params, tokens, gen_len)
     kvcache = KVCache.new(model_params, bsz)
     logits, kvcache, lm_state, _ = xfmr(xfmr_weights, model_params, lm_state, kvcache=kvcache, attn_mask=attn_mask) 
@@ -50,8 +49,7 @@ def main():
     #stop = jnp.array(tokenizer.stop_tokens)
     while lm_state.cur_pos < prompt_len + gen_len:
       logits, kvcache, lm_state, scores = xfmr(xfmr_weights, model_params, lm_state, kvcache)
-      # next_token = sample(sampler_params, lm_state.context[:,lm_state.cur_pos], logits, scores).reshape(1)
-      next_token = jnp.argmax(logits[:, -1], axis=-1).astype(jnp.int32)
+      next_token = sample(sampler_params, lm_state.context[:,lm_state.cur_pos], logits, scores).reshape(1)
       lm_state = lm_state.update_context(next_token, logits)
       print(tokenizer.decode(next_token), end='', flush=True)
       if jnp.isin(next_token, stop).any():
