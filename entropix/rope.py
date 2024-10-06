@@ -1,9 +1,9 @@
 
-from typing import Tuple, NamedTuple
+from typing import Tuple
 import jax.numpy as jnp
 import jax
 import math
-from entropix.config import RopeParams
+from entropix.config import ModelParams, ScaledRopeParams
 
 #@partial(jax.jit, static_argnames=("dtype"))
 def apply_rotary_emb(xq: jax.Array, xk: jax.Array, freqs_cis: jax.Array, dtype: jnp.dtype = jnp.float32) -> Tuple[jax.Array, jax.Array]:
@@ -17,19 +17,19 @@ def apply_rotary_emb(xq: jax.Array, xk: jax.Array, freqs_cis: jax.Array, dtype: 
   xk_out = jnp.stack((jnp.real(xk_out), jnp.imag(xk_out)), axis=-1).reshape(*xk_out.shape[:-1], -1)
   return xq_out.astype(dtype), xk_out.astype(dtype)
 
-def precompute_freqs_cis(end: int, rope_params: RopeParams, dtype: jnp.dtype = jnp.float32) -> jax.Array:
-  freqs = 1.0 / (rope_params.theta ** (jnp.arange(0, rope_params.dim, 2)[: (rope_params.dim // 2)].astype(dtype) / rope_params.dim))
-  if rope_params.use_scaled_rope:
-    freqs = apply_scaling(rope_params, freqs)
-  t = jnp.arange(end, dtype=dtype)
-  freqs = jnp.outer(t, freqs)
+def precompute_freqs_cis(model_params: ModelParams, dtype: jnp.dtype = jnp.float32) -> jax.Array:
+  dim = model_params.head_dim
+  freqs = 1.0 / (model_params.rope_theta ** (jnp.arange(0, dim, 2)[: (dim // 2)].astype(dtype) / dim))
+  if model_params.use_scaled_rope:
+    freqs = apply_scaling(model_params.scaled_rope_params, freqs)
+  freqs = jnp.outer(jnp.arange(model_params.max_seq_len, dtype=dtype), freqs)
   return jnp.exp(1j * freqs)
 
-def apply_scaling(rope_params: RopeParams, freqs: jax.Array):
-  scale_factor = rope_params.scale_factor
-  low_freq_factor = rope_params.low_freq_factor
-  high_freq_factor = rope_params.high_freq_factor
-  old_context_len = rope_params.old_context_len  # original llama3 length
+def apply_scaling(scaled_rope_params: ScaledRopeParams, freqs: jax.Array):
+  scale_factor = scaled_rope_params.scale_factor
+  low_freq_factor = scaled_rope_params.low_freq_factor
+  high_freq_factor = scaled_rope_params.high_freq_factor
+  old_context_len = scaled_rope_params.old_context_len  # original llama3 length
 
   low_freq_wavelen = old_context_len / low_freq_factor
   high_freq_wavelen = old_context_len / high_freq_factor

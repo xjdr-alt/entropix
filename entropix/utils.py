@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 from typing import Tuple
 
+LN_2 = 0.69314718056  # ln(2) = 1.0 / LOG2_E
 
 @jax.jit
 def calculate_varentropy_logsoftmax(logits: jnp.ndarray, axis: int = -1) -> Tuple[jnp.ndarray, jnp.ndarray]:

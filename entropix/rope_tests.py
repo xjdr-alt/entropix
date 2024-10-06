@@ -37,7 +37,7 @@ def apply_rotary_emb(xq: jax.Array, xk: jax.Array, freqs_cis: jax.Array, dtype: 
 
 def precompute_freqs_cis(end: int, rope_params: RopeParams, dtype: jnp.dtype = jnp.float32) -> jax.Array:
     freqs = 1.0 / (rope_params.theta ** (jnp.arange(0, rope_params.dim, 2)[: (rope_params.dim // 2)].astype(dtype) / rope_params.dim))
-    if rope_params.use_scaled_rope:
+    if rope_params.use_scaled:
         freqs = apply_scaling(rope_params, freqs)
     t = jnp.arange(end, dtype=dtype)
     freqs = jnp.outer(t, freqs)

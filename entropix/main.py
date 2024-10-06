@@ -2,14 +2,15 @@ import jax
 import jax.numpy as jnp
 import tyro
 from entropix.config import LLAMA_1B_PARAMS
-from entropix.kvcache import KVCache
+from entropix.lm_state import LMState
 from entropix.model import xfmr
-from entropix.prompts import prompt, bp1
-from entropix.sampler import sample
+from entropix.prompts import prompt3 as prompt
+from entropix.sampler import sample, SamplerParams
 from entropix.tokenizer import Tokenizer
 from entropix.weights import load_weights
 from entropix.rope import precompute_freqs_cis
-from entropix.generator import generate
+from entropix.kvcache import KVCache
+
 
 def build_attn_mask(seqlen: int, start_pos: int) -> jax.Array:
   mask = jnp.zeros((seqlen, seqlen), dtype=jnp.float32)
@@ -25,34 +26,37 @@ def main():
 
   tokenizer = Tokenizer('entropix/tokenizer.model')
   raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
-  base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False, allowed_special='all')
-
+  # base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False, allowed_special='all')
+  sampler_params = SamplerParams(
+    temp=0.66,
+    top_k=40,
+    top_p=0.9,
+    min_p=0.03 # turn down to 0.01 to reduce shoggoth symptoms
+  )
   # Create the batch of tokens
-  def generate(xfmr_weights, model_params, tokens):
+  def generate(xfmr_weights, model_params, sampler_params, tokens, gen_len):
     gen_tokens = None
-    cur_pos = 0
     tokens = jnp.array([tokens], jnp.int32)
-    bsz, seqlen = tokens.shape
-    attn_mask = build_attn_mask(seqlen, cur_pos)
-    freqs_cis = precompute_freqs_cis(model_params.head_dim, model_params.max_seq_len, model_params.rope_theta, model_params.use_scaled_rope)
-    kvcache = KVCache.new(model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim)
-    logits, kvcache, _, _ = xfmr(xfmr_weights, model_params, tokens, cur_pos, freqs_cis[:seqlen], kvcache, attn_mask=attn_mask)
-    next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
-    gen_tokens = next_token
-    print(tokenizer.decode([next_token.item()]), end='', flush=True)
-    cur_pos = seqlen
+    bsz, prompt_len = tokens.shape
+    attn_mask = build_attn_mask(prompt_len, 0)
+    lm_state = LMState.new(model_params, tokens, gen_len)
+    kvcache = KVCache.new(model_params, bsz)
+    logits, kvcache, lm_state, _ = xfmr(xfmr_weights, model_params, lm_state, kvcache=kvcache, attn_mask=attn_mask) 
+    next_token = jnp.argmax(logits[:, -1], axis=-1).astype(jnp.int32)
+    lm_state = lm_state.update_context(next_token, logits)
+    print(tokenizer.decode(next_token.tolist()), end='', flush=True)
     stop = jnp.array([128001, 128008, 128009])
     #stop = jnp.array(tokenizer.stop_tokens)
-    while cur_pos < 8192:
-      cur_pos += 1
-      logits, kvcache, scores, stats = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache)
-      next_token = sample(gen_tokens, logits, scores)
-      gen_tokens = jnp.concatenate((gen_tokens, next_token))
+    while lm_state.cur_pos < prompt_len + gen_len:
+      logits, kvcache, lm_state, scores = xfmr(xfmr_weights, model_params, lm_state, kvcache)
+      next_token = sample(sampler_params, lm_state.context[:,lm_state.cur_pos], logits, scores)
+      lm_state = lm_state.update_context(next_token, logits)
       print(tokenizer.decode(next_token.tolist()[0]), end='', flush=True)
       if jnp.isin(next_token, stop).any():
         break
 
-  generate(xfmr_weights, model_params, raw_tokens1)
+
+  generate(xfmr_weights, model_params, sampler_params, raw_tokens1, 1000)
 
 if __name__ == '__main__':
   tyro.cli(main)
