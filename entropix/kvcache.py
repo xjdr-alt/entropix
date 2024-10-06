@@ -26,4 +26,3 @@ class KVCache(NamedTuple):
       values = jnp.repeat(cv[layer_idx], n_rep, axis=2)
 
     return keys, values, KVCache(k=ck, v=cv)
-

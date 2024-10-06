@@ -2,16 +2,13 @@ from typing import Optional, Tuple
 
 import jax
 import jax.numpy as jnp
-from entropix.stats import AttnStats
-from functools import partial
-from rich import print as rprint
+from entropix.lm_state import AttnStats
 from entropix.config import ModelParams
 from entropix.kvcache import KVCache
-from entropix.stats import AttnStats
-from entropix.stats import AttnStats
+from entropix.lm_state import AttnStats
 from entropix.weights import XfmrWeights, LayerWeights
 from entropix.rope import apply_rotary_emb
-
+from entropix.lm_state import LMState
 
 DEFAULT_MASK_VALUE = -0.7 * float(jnp.finfo(jnp.dtype("float32")).max)
 
@@ -49,18 +46,14 @@ def feed_forward(x: jax.Array, layer_weights: LayerWeights) -> jax.Array:
  return jnp.dot(jax.nn.silu(jnp.dot(x, layer_weights.w1.T)) * jnp.dot(x, layer_weights.w3.T), layer_weights.w2.T)
 
 #@partial(jax.jit, static_argnames=("model_params", "cur_pos"))
-def xfmr(xfmr_weights: XfmrWeights, model_params: ModelParams, tokens: jax.Array, cur_pos: int, freqs_cis: jax.Array, kvcache: KVCache, attn_mask: Optional[jax.Array]=None) -> Tuple[jax.Array, KVCache]:
-  h = xfmr_weights.tok_embeddings[tokens]
-  attn_stats = AttnStats.new(
-    bsz=tokens.shape[0],
-    n_layers=model_params.n_layers,
-    n_heads=model_params.n_local_heads
-  )
+def xfmr(xfmr_weights: XfmrWeights, model_params: ModelParams, lm_state: LMState, freqs_cis: jax.Array, kvcache: KVCache, attn_mask: Optional[jax.Array]=None) -> Tuple[jax.Array, KVCache]:
+  h = xfmr_weights.tok_embeddings[lm_state.context]
   for i in range(model_params.n_layers):
     norm_x = rms_norm(h, xfmr_weights.layer_weights[i].attention_norm)
-    h_attn, kvcache, scores = attention(norm_x, xfmr_weights.layer_weights[i], model_params, cur_pos, i, freqs_cis, kvcache, attn_mask=attn_mask)
+    h_attn, kvcache, scores = attention(norm_x, xfmr_weights.layer_weights[i], model_params, lm_state.cur_pos, i, freqs_cis, kvcache, attn_mask=attn_mask)
+    lm_state.update()
     attn_stats = attn_stats.update(scores[:,:,-1,:], i)
     h = h + h_attn
     h = h + feed_forward(rms_norm(h, xfmr_weights.layer_weights[i].ffn_norm), xfmr_weights.layer_weights[i])
   logits = jnp.dot(rms_norm(h, xfmr_weights.norm), xfmr_weights.output.T)
-  return logits, kvcache, attn_stats
+  return logits, kvcache, scores, attn_stats
