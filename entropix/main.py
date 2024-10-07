@@ -12,7 +12,7 @@ from entropix.prompts import create_prompts_from_csv, prompt
 from entropix.sampler import sample
 from entropix.tokenizer import Tokenizer
 from entropix.weights import load_weights
-from entropix.generator import generate
+from entropix.generator import generate, vanilla_generate, initialize
 
 
 DEFAULT_WEIGHTS_PATH = Path(__file__).parent / '../weights'
@@ -36,15 +36,20 @@ def main(weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('1B-Instruct')):
   prompts = create_prompts_from_csv(csv_path)
   PROMPT_TEST = False
 
+  # Create a random key
+  rng_key = jax.random.PRNGKey(0)
+
   if PROMPT_TEST:
     for p in prompts:
       print(p)
       tokens = tokenizer.encode(p,  bos=False, eos=False, allowed_special='all')
-      generate(xfmr_weights, model_params, tokenizer, tokens, 100)
+      initial_state = initialize(model_params, tokens, 100)
+      generate(xfmr_weights, model_params, tokenizer, initial_state, 100)
   else:
     print(prompt)
     tokens = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
-    generate(xfmr_weights, model_params, tokenizer, tokens, 100)
+    initial_state = initialize(model_params, tokens, 100)
+    generate(xfmr_weights, model_params, tokenizer, initial_state, 100)
 
 if __name__ == '__main__':
   tyro.cli(main)
