@@ -69,7 +69,7 @@ run it (torch)
 
 ## Docker Setup
 
-Note: currently we only have Docker support for CUDA.
+Note: currently we only have Docker support for CUDA and CPU.
 
 To build and run the project using Docker, follow these steps:
 
@@ -80,14 +80,15 @@ To build and run the project using Docker, follow these steps:
 
 2. Build the Docker image using the following command:
    ```bash
-   DOCKER_BUILDKIT=1 docker build \
-     --secret id=ssh_key,src=$HOME/.ssh/your_ssh_key \
-     --secret id=known_hosts,src=$HOME/.ssh/known_hosts \
-     --secret id=hf_token,env=HF_TOKEN \
-     -t entropix \
-     -f docker/Dockerfile.entropix_cuda .
-   ```
-   Make sure to replace `your_ssh_key` with the path to your actual SSH key.
+  DOCKER_BUILDKIT=1 docker build \
+    --secret id=ssh_key,src=$HOME/.ssh/your_ssh_key \
+    --secret id=known_hosts,src=$HOME/.ssh/known_hosts \
+    --secret id=hf_token,env=HF_TOKEN \
+    --build-arg BACKEND=cuda \
+    -t entropix \
+    -f docker/Dockerfile.entropix .   
+    ```
+   Make sure to replace `your_ssh_key` with the path to your actual SSH key, and to set the `BACKEND` argument to `cpu` if you want to build the CPU image.
 
 3. Once the image is built, you can run it using:
    ```bash

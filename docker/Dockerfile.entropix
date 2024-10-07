@@ -1,4 +1,13 @@
-FROM nvidia/cuda:12.3.1-base-ubuntu22.04
+ARG BACKEND=cuda
+# CUDA base image
+FROM nvidia/cuda:12.3.1-base-ubuntu22.04 AS cuda_base
+# CPU base image
+FROM ubuntu:22.04 AS cpu_base
+
+FROM ${BACKEND}_base AS final
+ARG DEBIAN_FRONTEND=noninteractive
+ARG BACKEND
+
 # Required to disable interactive prompts when installing openssh.
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
