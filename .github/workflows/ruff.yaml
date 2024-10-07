@@ -1,0 +1,16 @@
+name: Ruff
+on: [push, pull_request]
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v1
+        with:
+          src: "./entropix"
+          args: "format --check"
+          changed-files: "true"
+      - uses: astral-sh/ruff-action@v1
+        with:
+          args: "check entropix --diff"
+          changed-files: "true"

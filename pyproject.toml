@@ -1,3 +1,6 @@
+[project]
+requires-python = ">=3.11"
+
 [tool.poetry]
 name = "entropix"
 version = "0.1.0"
@@ -42,7 +45,11 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
 extend-exclude = ["tests/**"]
-lint.select = [
+line-length = 100
+indent-width = 2
+
+[tool.ruff.lint]
+select = [
   # pycodestyle
   "E",
   # Pyflakes
@@ -58,9 +65,7 @@ lint.select = [
   # Ruff
   "RUF",
 ]
-lint.ignore = [
+ignore = [
   "E501",   # ignore line-length (e.g. long docstring)
   "SIM117", # ignore combine with statements (it leads to harder to read code)
 ]
-line-length = 88
-indent-width = 2
