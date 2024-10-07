@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState, useCallback, memo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ChevronRightIcon} from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn } from "@/library/utils"
 
 interface OutputEntry {
   id: string
