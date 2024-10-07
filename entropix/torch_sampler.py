@@ -60,7 +60,7 @@ def calculate_metrics(logits: torch.Tensor, attention_scores: torch.Tensor) -> D
 
     attention_probs = F.softmax(attention_scores, dim=-1)
     attn_entropy = -torch.sum(attention_probs * torch.log2(torch.clamp(attention_probs, 1e-10, 1.0)), dim=-1)
-    attn_varentropy = torch.var(attn_entropy, dim=-1)
+    attn_varentropy = torch.var(attn_entropy, dim=1)
 
     mean_attention = torch.mean(attention_probs, dim=1)
     agreement = torch.mean(torch.abs(attention_probs - mean_attention.unsqueeze(1)), dim=(1, 2))
