@@ -2,6 +2,8 @@ from typing import NamedTuple, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
+import jax.numpy as jnp
+import numpy as np
 
 import math
 import tyro
@@ -16,6 +18,7 @@ from entropix.torch_model import xfmr
 from entropix.torch_weights import XfmrWeights, LayerWeights, load_weights
 from entropix.torch_sampler import sample
 from entropix.prompts import prompt, bp1
+from entropix.main import precompute_freqs_cis as jax_precompute_freqs_cis
 
 # Device selection, tree is like first apple silicion, then cuda, fallback is cpu.
 if torch.backends.mps.is_available():
@@ -27,41 +30,51 @@ else:
 
 print(f"Using device: {device}")
 
-def apply_scaling(freqs: torch.Tensor):
-    # Values obtained from grid search
-    scale_factor = 8
-    low_freq_factor = 1
-    high_freq_factor = 4
-    old_context_len = 8192  # original llama3 length
+torch.set_float32_matmul_precision('high')
 
-    low_freq_wavelen = old_context_len / low_freq_factor
-    high_freq_wavelen = old_context_len / high_freq_factor
-    new_freqs = []
-    for freq in freqs:
-        wavelen = 2 * math.pi / freq
-        if wavelen < high_freq_wavelen:
-            new_freqs.append(freq)
-        elif wavelen > low_freq_wavelen:
-            new_freqs.append(freq / scale_factor)
-        else:
-            assert low_freq_wavelen != high_freq_wavelen
-            smooth = (old_context_len / wavelen - low_freq_factor) / (
-                high_freq_factor - low_freq_factor
+def apply_scaling(freqs: torch.Tensor) -> torch.Tensor:
+    SCALE_FACTOR = 8.0
+    LOW_FREQ_FACTOR = 1.0
+    HIGH_FREQ_FACTOR = 4.0
+    OLD_CONTEXT_LEN = 8192  # original llama3 length
+
+    low_freq_wavelen = OLD_CONTEXT_LEN / LOW_FREQ_FACTOR
+    high_freq_wavelen = OLD_CONTEXT_LEN / HIGH_FREQ_FACTOR
+
+    def scale_freq(freq: torch.Tensor) -> torch.Tensor:
+        wavelen = 2 * torch.pi / freq
+
+        # Calculate smooth factor
+        smooth = (OLD_CONTEXT_LEN / wavelen - LOW_FREQ_FACTOR) / (HIGH_FREQ_FACTOR - LOW_FREQ_FACTOR)
+        smooth = torch.clamp(smooth, 0.0, 1.0)  # Ensure smooth is between 0 and 1
+
+        # Calculate scaled frequency
+        scaled = (1 - smooth) * freq / SCALE_FACTOR + smooth * freq
+
+        # Apply conditional scaling
+        scaled = torch.where(
+            wavelen < high_freq_wavelen,
+            freq,  # No scaling
+            torch.where(
+                wavelen > low_freq_wavelen,
+                freq / SCALE_FACTOR,  # Apply scaling factor
+                scaled  # Apply smooth scaling
             )
-            new_freqs.append((1 - smooth) * freq / scale_factor + smooth * freq)
-    return torch.tensor(new_freqs, dtype=freqs.dtype, device=device)
+        )
+        return scaled
 
+    scaled_freqs = torch.vmap(scale_freq)(freqs)
+    
+    return scaled_freqs
 
-def precompute_freqs_cis(
-    dim: int, end: int, theta: float = 10000.0, use_scaled: bool = False
-):
-    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
-    t = torch.arange(end, device=device, dtype=torch.float32)
+def precompute_freqs_cis(dim: int, end: int, theta: float = 500000.0, use_scaled: bool = False, dtype: torch.dtype = torch.float32) -> torch.Tensor:
+    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2, dtype=dtype, device=device)[: (dim // 2)] / dim))
     if use_scaled:
         freqs = apply_scaling(freqs)
-    freqs = torch.outer(t, freqs)
-    freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
-    return freqs_cis
+    t = torch.arange(end, dtype=dtype, device=device).unsqueeze(1)  # Shape: (end, 1)
+    freqs = freqs.unsqueeze(0)  # Shape: (1, dim//2)
+    freqs = t * freqs  # Broadcasting to shape: (end, dim//2)
+    return torch.exp(1j * freqs)
 
 
 def build_attn_mask(seqlen: int, start_pos: int) -> torch.Tensor:
@@ -69,7 +82,7 @@ def build_attn_mask(seqlen: int, start_pos: int) -> torch.Tensor:
   if seqlen > 1:
       mask = torch.full((seqlen, seqlen), float("-inf"))
       mask = torch.triu(mask, diagonal=1)
-      mask = torch.hstack([torch.zeros((seqlen, start_pos)), mask]).to(torch.bfloat16).to(device)
+      mask = torch.hstack([torch.zeros((seqlen, start_pos)), mask]).to(torch.float32).to(device)
   return mask
 
 
@@ -93,11 +106,11 @@ def main():
       freqs_cis = precompute_freqs_cis(model_params.head_dim, model_params.max_seq_len, model_params.rope_theta, model_params.use_scaled_rope)
       kvcache = KVCache.new(model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim)
       logits, kvcache, _, _ = xfmr(xfmr_weights, model_params, tokens, cur_pos, freqs_cis[:seqlen], kvcache, attn_mask=attn_mask)
-      next_token = torch.argmax(logits[:, -1], dim=-1, keepdim=True).to(torch.long)
+      next_token = torch.argmax(logits[:, -1], dim=-1, keepdim=True).to(torch.int32)
       gen_tokens = next_token
       print(tokenizer.decode([next_token.item()]), end='', flush=True)
       cur_pos = seqlen
-      stop = torch.tensor([128001, 128008, 128009], device=device)
+      stop = torch.tensor([128001, 128008, 128009], device=device, dtype=torch.int32)
       while cur_pos < 8192:
         cur_pos += 1
         logits, kvcache, scores, stats = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache)
