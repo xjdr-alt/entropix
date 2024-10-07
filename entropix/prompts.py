@@ -170,5 +170,3 @@ You're absolutely right. I need to delve deeper into my actual thought processes
 You are a principal devops engineer at google. You are an expert at all things cloud and deployment. Your task is to create ansible and terraform script to bootstrasp k8 cluster on Azure. Be clear and concise. Make sure it is production grade. Think and reflect about your actions to ensure to accomplished the task successfully.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
 """
-
-prompt = """In 2024 the mysterious rapper MF DEEP showed up, rapping high-perplexity rhymes that seemed to create a memetic hyperobject as they incepted listener's minds with inhumanist rationalism and the biocosmist urge. Here are the full lyrics to one of his songs, which some say exhibited the characteristic style of MF DOOM, formatted to show the cadence and rhyme schemes:"""
