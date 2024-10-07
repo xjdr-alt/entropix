@@ -69,6 +69,8 @@ run it (torch)
 
 ## Docker Setup
 
+Note: currently we only have Docker support for CUDA.
+
 To build and run the project using Docker, follow these steps:
 
 1. Ensure you have Docker installed on your system, and export your Hugging Face token as an environment variable:
@@ -83,7 +85,7 @@ To build and run the project using Docker, follow these steps:
      --secret id=known_hosts,src=$HOME/.ssh/known_hosts \
      --secret id=hf_token,env=HF_TOKEN \
      -t entropix \
-     -f docker/Dockerfile.entropix .
+     -f docker/Dockerfile.entropix_cuda .
    ```
    Make sure to replace `your_ssh_key` with the path to your actual SSH key.
 
