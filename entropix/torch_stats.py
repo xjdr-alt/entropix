@@ -1,5 +1,16 @@
-from typing import NamedTuple
 import torch
+
+# Device selection, tree is like first apple silicion, then cuda, fallback is cpu.
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+elif torch.cuda.is_available():
+    device = torch.device("cuda")
+else:
+    device = torch.device("cpu")
+
+#print(f"Using device: {device}")
+
+from typing import NamedTuple
 
 class AttnStats(NamedTuple):
     entropy: torch.Tensor  # (bsz, n_layers, num_heads)
@@ -10,8 +21,8 @@ class AttnStats(NamedTuple):
     @classmethod
     def new(cls, bsz: int, n_layers: int, n_heads: int) -> 'AttnStats':
         return cls(
-            entropy=torch.zeros((bsz, n_layers, n_heads), dtype=torch.float32),
-            varentropy=torch.zeros((bsz, n_layers, n_heads), dtype=torch.float32),
+            entropy=torch.zeros((bsz, n_layers, n_heads), dtype=torch.float32, device=device),
+            varentropy=torch.zeros((bsz, n_layers, n_heads), dtype=torch.float32, device=device),
             n_layers=n_layers,
             n_heads=n_heads
         )

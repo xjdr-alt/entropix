@@ -57,9 +57,14 @@ if using huggingface-cli, make sure you have logged in.
 poetry run bash -c "huggingface-cli download meta-llama/Llama-3.2-1B-Instruct original/tokenizer.model --local-dir entropix && mv entropix/original/tokenizer.model entropix/ && rmdir entropix/original"
 ```
 
-run it
+run it (jax)
 ```bash
  PYTHONPATH=. poetry run python entropix/main.py
+```
+
+run it (torch)
+```bash
+ PYTHONPATH=. poetry run python entropix/torch_main.py
 ```
 
 

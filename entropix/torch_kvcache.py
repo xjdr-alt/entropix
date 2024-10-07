@@ -1,6 +1,16 @@
 import torch
 import torch.nn as nn
 
+# Device selection, tree is like first apple silicion, then cuda, fallback is cpu.
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+elif torch.cuda.is_available():
+    device = torch.device("cuda")
+else:
+    device = torch.device("cpu")
+
+#print(f"Using device: {device}")
+
 class KVCache(nn.Module):
     def __init__(self, layers: int, bsz: int, max_seq_len: int, kv_heads: int, head_dim: int):
         super(KVCache, self).__init__()
@@ -9,14 +19,16 @@ class KVCache(nn.Module):
             'k',
             torch.zeros(
                 (layers, bsz, max_seq_len, kv_heads, head_dim),
-                dtype=torch.bfloat16
+                dtype=torch.bfloat16,
+                device=device
             )
         )
         self.register_buffer(
             'v',
             torch.zeros(
                 (layers, bsz, max_seq_len, kv_heads, head_dim),
-                dtype=torch.bfloat16
+                dtype=torch.bfloat16,
+                device=device
             )
         )
 

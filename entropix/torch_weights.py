@@ -10,6 +10,16 @@ import ml_dtypes
 
 from pathlib import Path
 
+# Device selection, tree is like first apple silicion, then cuda, fallback is cpu.
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+elif torch.cuda.is_available():
+    device = torch.device("cuda")
+else:
+    device = torch.device("cpu")
+
+#print(f"Using device: {device}")
+
 class LayerWeights(NamedTuple):
   wq: torch.Tensor
   wk: torch.Tensor
@@ -41,14 +51,13 @@ def compare_outputs(torch_output: torch.Tensor, jax_output: jax.Array, atol: flo
 def load_weights(ckpt_dir: Path = Path('weights/1B-Instruct'), n_layers: int = 16):
   w = {}
   layer_weights = []
-  device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
   with torch.inference_mode():
     for file in ckpt_dir.glob("*.npy"):
       name = '.'.join(str(file).split('/')[-1].split('.')[:-1])
       jax_weight = jnp.load(file=file, mmap_mode='r', allow_pickle=True)
       #print(f'JAX output (first 30): {jax_weight.flatten()[:30]}')
       np_weight = np.array(jax_weight).astype(np.float32)
-      weight = torch.from_numpy(np_weight).to(torch.bfloat16)
+      weight = torch.from_numpy(np_weight).to(torch.bfloat16).to(device)
       compare_outputs(torch_output=weight, jax_output=jax_weight)
       w[name] = weight.to(device)
     for i in range(n_layers):
