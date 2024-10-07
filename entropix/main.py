@@ -10,7 +10,6 @@ from entropix.kvcache import KVCache
 from entropix.model import xfmr
 from entropix.sampler import SamplerConfig, sample
 from entropix.prompts import create_prompts_from_csv, prompt
-from entropix.sampler import sample
 from entropix.tokenizer import Tokenizer
 from entropix.weights import load_weights
 
