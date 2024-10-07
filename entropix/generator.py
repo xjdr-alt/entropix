@@ -1,7 +1,8 @@
 from entropix.model import KVCache
 from entropix.rope import precompute_freqs_cis
 from entropix.sampler import sample
-from entropix.lm_state import LMState
+from entropix.stats import AttnStats
+from entropix.sampler import SamplerConfig
 from entropix.model import xfmr
 import jax.numpy as jnp
 import jax
@@ -14,32 +15,51 @@ def build_attn_mask(seqlen: int, start_pos: int) -> jax.Array:
     mask = jnp.hstack([jnp.zeros((seqlen, start_pos)), mask], dtype=jnp.float32)
   return mask
 
-def generate(xfmr_weights, model_params, sampler_params, tokenizer, tokens):
-    tokens = jnp.array([tokens], jnp.int32)
-    n_words = tokenizer.n_words
+
+def _initialize(model_params, tokens, max_gen_len):    
+    tokens = jnp.array([tokens], dtype=jnp.int32)
     bsz, seqlen = tokens.shape
-    lm_state = LMState(
-      prompt=tokens,
-      logits=jnp.zeros((bsz, n_words), dtype=jnp.bfloat16),
-      freqs_cis=precompute_freqs_cis(head_dim=model_params.head_dim, max_seq_len=model_params.max_seq_len, rope_params=model_params.rope_params),
-      kvcache=KVCache.new(model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim),
-      attn_mask=build_attn_mask(seqlen, 0),
-      gen_tokens=jnp.zeros((bsz, 0), dtype=jnp.int32),
-      state=jnp.zeros((bsz, 1), dtype=jnp.int32),
-      pos=0
-    )
-    lm_state.logits, lm_state.kvcache, _ = xfmr(xfmr_weights, model_params, lm_state.context, lm_state.pos, freqs_cis=lm_state.freqs_cis[:seqlen], kvcache=lm_state.kvcache, attn_mask=lm_state.attn_mask)
-    next_token = jnp.argmax(lm_state.logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
-    lm_state.gen_tokens, lm_state.pos = jnp.concatenate((lm_state.gen_tokens, next_token), axis=1), seqlen
+    max_total_len=seqlen + max_gen_len
+    attn_mask = build_attn_mask(seqlen, 0)
+    freqs_cis = precompute_freqs_cis(model_params)
+    kvcache = KVCache.new(model_params, bsz, max_total_len)
+    attn_stats = AttnStats.new(model_params, bsz, max_total_len)
+    stop = jnp.array([128001, 128008, 128009], dtype=jnp.int32)
+    sampler_cfg = SamplerConfig()
+    return {
+        'tokens': tokens,
+        'kvcache': kvcache,
+        'attn_stats': attn_stats,
+        'freqs_cis': freqs_cis,
+        'attn_mask': attn_mask,
+        'stop_tokens': stop,
+        'sampler_cfg': sampler_cfg,
+    }
+
+def generate(xfmr_weights, model_params, tokenizer, tokens, max_gen_len):
+    initial_state = _initialize(model_params, tokens, max_gen_len)
+
+    kvcache = initial_state['kvcache']
+    attn_stats = initial_state['attn_stats']
+    attn_mask = initial_state['attn_mask']
+    freqs_cis = initial_state['freqs_cis']
+    stop_tokens = initial_state['stop_tokens']
+    sampler_cfg = initial_state['sampler_cfg']
+    tokens = initial_state['tokens']
+    
+    prompt_len = tokens.shape[1]
+
+    logits, kvcache, _, _ = xfmr(xfmr_weights, model_params, tokens, 0, freqs_cis[:prompt_len], kvcache, attn_stats, attn_mask=attn_mask)
+    cur_pos, max_total_len = prompt_len, prompt_len + max_gen_len
+    
+    next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
+    gen_tokens = next_token
     print(tokenizer.decode([next_token.item()]), end='', flush=True)
-    #stop = jnp.array(tokenizer.stop_tokens)
-    while lm_state.pos < 2048:
-      lm_state.pos += 1
-      lm_state.logits, lm_state.kvcache, _ = xfmr(xfmr_weights, model_params, next_token, lm_state.pos, lm_state.freqs_cis[lm_state.pos:lm_state.pos+1], lm_state.kvcache)
-      next_token = sample(sampler_params, lm_state)
-      lm_state.gen_tokens = jnp.concatenate((lm_state.gen_tokens, next_token), axis=1)
+    while cur_pos < max_total_len:
+      cur_pos += 1
+      logits, kvcache, scores, attn_stats = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache, attn_stats)
+      next_token = sample(gen_tokens, logits, scores, cfg=sampler_cfg)
+      gen_tokens = jnp.concatenate((gen_tokens, next_token))
       print(tokenizer.decode(next_token.tolist()[0]), end='', flush=True)
-      if jnp.isin(next_token, sampler_params.stop_tokens).any():
+      if jnp.isin(next_token, stop_tokens).any():
         break
-
-
