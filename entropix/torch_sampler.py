@@ -2,6 +2,16 @@ import torch
 import torch.nn.functional as F
 from typing import Tuple, Dict
 
+# Device selection, tree is like first apple silicion, then cuda, fallback is cpu.
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+elif torch.cuda.is_available():
+    device = torch.device("cuda")
+else:
+    device = torch.device("cpu")
+
+#print(f"Using device: {device}")
+
 LN_2 = 0.69314718056  # ln(2) = 1.0 / LOG2_E
 
 def calculate_varentropy_logsoftmax(logits: torch.Tensor, axis: int = -1) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -17,6 +27,12 @@ def _sample(logits: torch.Tensor, temperature=1.0, top_p=1.0, top_k=0, min_p: fl
     logit = logits[:, -1]
     probs = F.softmax(logit / temperature, dim=-1)
     
+    # Convert to float32, apply nan_to_num, then convert back to original dtype, this is because mp
+    original_dtype = probs.dtype
+    probs = probs.to(torch.float32)
+    probs = torch.nan_to_num(probs, nan=1e-8, posinf=1e-8, neginf=1e-8)
+    probs = probs.to(original_dtype)
+
     # Add a check for invalid probability values
     if torch.isnan(probs).any() or torch.isinf(probs).any() or (probs < 0).any():
         # print("Warning: Invalid probability values detected")
@@ -31,7 +47,7 @@ def _sample(logits: torch.Tensor, temperature=1.0, top_p=1.0, top_k=0, min_p: fl
     if min_p > 0.0:
         p_max = torch.max(probs, dim=-1, keepdim=True).values
         indices_to_remove = probs < (min_p * p_max)
-        logit = torch.where(indices_to_remove, torch.full_like(logit, float('-inf')), logit)
+        logit = torch.where(indices_to_remove, torch.full_like(logit, float('-inf'), device=device), logit)
 
     # Apply top-k sampling
     top_k_probs, top_k_indices = torch.topk(probs, k=top_k)
@@ -124,8 +140,8 @@ def sample(gen_tokens: torch.Tensor, logits: torch.Tensor, attention_scores: tor
     # High Entropy, Low Varentropy: "treading carefully, asking clarifying questions"
     elif ent > 3.0 and vent < 0.1:
         # Insert a clarifying question token if not already present
-        if not torch.isin(gen_tokens[:,-1], torch.tensor([2564])).any():
-            return torch.tensor([[2564]], dtype=torch.long)  # Assuming 2564 is our "ask clarifying question" token
+        if not torch.isin(gen_tokens[:,-1], torch.tensor([2564], device=device)).any():
+            return torch.tensor([[2564]], dtype=torch.long, device=device)  # Assuming 2564 is our "ask clarifying question" token
         else:
             # If we've just asked a question, sample with slightly higher temperature
             temp_adj = 1.3 + 0.2 * attn_ent  # Increase temperature based on attention entropy

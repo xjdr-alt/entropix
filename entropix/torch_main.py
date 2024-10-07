@@ -17,6 +17,15 @@ from entropix.torch_weights import XfmrWeights, LayerWeights, load_weights
 from entropix.torch_sampler import sample
 from entropix.prompts import prompt, bp1
 
+# Device selection, tree is like first apple silicion, then cuda, fallback is cpu.
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+elif torch.cuda.is_available():
+    device = torch.device("cuda")
+else:
+    device = torch.device("cpu")
+
+print(f"Using device: {device}")
 
 def apply_scaling(freqs: torch.Tensor):
     # Values obtained from grid search
@@ -40,14 +49,14 @@ def apply_scaling(freqs: torch.Tensor):
                 high_freq_factor - low_freq_factor
             )
             new_freqs.append((1 - smooth) * freq / scale_factor + smooth * freq)
-    return torch.tensor(new_freqs, dtype=freqs.dtype, device=freqs.device)
+    return torch.tensor(new_freqs, dtype=freqs.dtype, device=device)
 
 
 def precompute_freqs_cis(
     dim: int, end: int, theta: float = 10000.0, use_scaled: bool = False
 ):
     freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
-    t = torch.arange(end, device=freqs.device, dtype=torch.float32)
+    t = torch.arange(end, device=device, dtype=torch.float32)
     if use_scaled:
         freqs = apply_scaling(freqs)
     freqs = torch.outer(t, freqs)
@@ -60,7 +69,7 @@ def build_attn_mask(seqlen: int, start_pos: int) -> torch.Tensor:
   if seqlen > 1:
       mask = torch.full((seqlen, seqlen), float("-inf"))
       mask = torch.triu(mask, diagonal=1)
-      mask = torch.hstack([torch.zeros((seqlen, start_pos)), mask]).to(torch.bfloat16)
+      mask = torch.hstack([torch.zeros((seqlen, start_pos)), mask]).to(torch.bfloat16).to(device)
   return mask
 
 
@@ -78,7 +87,7 @@ def main():
     def generate(xfmr_weights, model_params, tokens):
       gen_tokens = None
       cur_pos = 0
-      tokens = torch.tensor([tokens], dtype=torch.long)
+      tokens = torch.tensor([tokens], dtype=torch.long).to(device)
       bsz, seqlen = tokens.shape
       attn_mask = build_attn_mask(seqlen, cur_pos)
       freqs_cis = precompute_freqs_cis(model_params.head_dim, model_params.max_seq_len, model_params.rope_theta, model_params.use_scaled_rope)
@@ -88,7 +97,7 @@ def main():
       gen_tokens = next_token
       print(tokenizer.decode([next_token.item()]), end='', flush=True)
       cur_pos = seqlen
-      stop = torch.tensor([128001, 128008, 128009])
+      stop = torch.tensor([128001, 128008, 128009], device=device)
       while cur_pos < 8192:
         cur_pos += 1
         logits, kvcache, scores, stats = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache)
