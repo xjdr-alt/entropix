@@ -9,12 +9,12 @@ from entropix.config import LLAMA_1B_PARAMS
 from entropix.kvcache import KVCache
 from entropix.model import xfmr
 from entropix.sampler import SamplerConfig, sample
-from entropix.prompts import create_prompts_from_csv
+from entropix.prompts import create_prompts_from_csv, prompt
 from entropix.sampler import sample
 from entropix.tokenizer import Tokenizer
 from entropix.weights import load_weights
 
-DEFAULT_WEIGHTS_PATH = Path(__file__).parent / 'weights'
+DEFAULT_WEIGHTS_PATH = Path(__file__).parent / '../weights'
 
 def apply_scaling(freqs: jax.Array):
   SCALE_FACTOR = 8
@@ -92,11 +92,17 @@ def main(weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('1B-Instruct')):
 
   csv_path = Path('entropix/data/prompts.csv')
   prompts = create_prompts_from_csv(csv_path)
-  raw_tokens1 = tokenizer.encode(prompts[0],  bos=False, eos=False, allowed_special='all')
+  PROMPT_TEST = False
 
-
-  print(prompts[0])
-  generate(xfmr_weights, model_params, raw_tokens1)
+  if PROMPT_TEST:
+    for p in prompts:
+      print(p)
+      tokens = tokenizer.encode(p,  bos=False, eos=False, allowed_special='all')
+      generate(xfmr_weights, model_params, tokens)
+  else:
+    print(prompt)
+    tokens = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
+    generate(xfmr_weights, model_params, tokens)
 
 if __name__ == '__main__':
   tyro.cli(main)
