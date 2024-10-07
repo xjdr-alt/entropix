@@ -13,7 +13,7 @@ from functools import partial
 from entropix.config import LLAMA_1B_PARAMS
 from entropix.kvcache import KVCache
 from entropix.model import xfmr
-from entropix.prompts import prompt, bp1
+from entropix.prompts import create_prompts_from_csv
 from entropix.sampler import sample
 from entropix.tokenizer import Tokenizer
 from entropix.weights import load_weights
@@ -66,10 +66,7 @@ def build_attn_mask(seqlen: int, start_pos: int) -> jax.Array:
 def main():
   model_params = LLAMA_1B_PARAMS
   xfmr_weights = load_weights()
-
   tokenizer = Tokenizer('entropix/tokenizer.model')
-  raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
-  base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False, allowed_special='all')
 
   # Create the batch of tokens
   def generate(xfmr_weights, model_params, tokens):
@@ -96,6 +93,12 @@ def main():
       if jnp.isin(next_token, stop).any():
         break
 
+  csv_path = Path('entropix/data/prompts.csv')
+  prompts = create_prompts_from_csv(csv_path)
+  raw_tokens1 = tokenizer.encode(prompts[0],  bos=False, eos=False, allowed_special='all')
+
+
+  print(prompts[0])
   generate(xfmr_weights, model_params, raw_tokens1)
 
 if __name__ == '__main__':
