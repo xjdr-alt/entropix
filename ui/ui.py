@@ -11,6 +11,8 @@ from entropix.main import sample, precompute_freqs_cis, build_attn_mask
 from entropix.model import xfmr
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from entropix.generator import generate
+
 import numpy as np
 
 class TextCompletionUI:
@@ -117,7 +119,7 @@ class TextCompletionUI:
             dim=model_params.head_dim,
             end=model_params.max_seq_len,
             theta=model_params.rope_theta,
-            use_scaled=model_params.use_scaled_rope
+            use_scaled=model_params.use_scaled
         )
         kvcache = KVCache.new(
             layers=model_params.n_layers,

@@ -13,13 +13,10 @@ from typing import (
   Sequence,
   Union,
 )
-import re
+
 import tiktoken
-import base64
-import tempfile
-import requests
-import hashlib
-import uuid
+
+from tiktoken.load import load_tiktoken_bpe
 
 logger = getLogger(__name__)
 
@@ -33,68 +30,6 @@ TIKTOKEN_MAX_ENCODE_CHARS = 400_000
 # of max consecutive non-whitespace or whitespace characters.
 MAX_NO_WHITESPACES_CHARS = 25_000
 
-def read_file(blobpath: str) -> bytes:
-    if not blobpath.startswith("http://") and not blobpath.startswith("https://"):
-        with open(blobpath, "rb") as f:
-            return f.read()
-    # Avoid using blobfile for public files to help avoid auth issues
-    resp = requests.get(blobpath)
-    resp.raise_for_status()
-    return resp.content
-
-def read_file_cached(blobpath: str) -> bytes:
-    if "TIKTOKEN_CACHE_DIR" in os.environ:
-        cache_dir = os.environ["TIKTOKEN_CACHE_DIR"]
-    elif "DATA_GYM_CACHE_DIR" in os.environ:
-        cache_dir = os.environ["DATA_GYM_CACHE_DIR"]
-    else:
-        cache_dir = os.path.join(tempfile.gettempdir(), "data-gym-cache")
-    if cache_dir == "":
-        # disable caching
-        return read_file(blobpath)
-
-    cache_key = hashlib.sha1(blobpath.encode()).hexdigest()
-
-    cache_path = os.path.join(cache_dir, cache_key)
-    if os.path.exists(cache_path):
-        with open(cache_path, "rb") as f:
-            return f.read()
-
-    contents = read_file(blobpath)
-
-    os.makedirs(cache_dir, exist_ok=True)
-    tmp_filename = cache_path + "." + str(uuid.uuid4()) + ".tmp"
-    with open(tmp_filename, "wb") as f:
-        f.write(contents)
-    os.rename(tmp_filename, cache_path)
-
-    return contents
-
-def load_tiktoken_bpe(tiktoken_bpe_file: str) -> dict[bytes, int]:
-       try:
-           contents = read_file_cached(tiktoken_bpe_file)
-       except Exception as e:
-           logger.error(f"Failed to read '{tiktoken_bpe_file}': {e}")
-           raise
-
-       bpe_dict = {}
-       for line_number, line in enumerate(contents.splitlines(), start=1):
-           if not line.strip():
-               continue  # Skip empty lines
-           parts = line.split()
-           if len(parts) != 2:
-               logger.error(f"Line {line_number} in {tiktoken_bpe_file} is malformed: '{line}'")
-               raise ValueError(f"Line {line_number} in {tiktoken_bpe_file} does not have exactly two elements.")
-           token, rank = parts
-           try:
-               decoded_token = base64.b64decode(token)
-               rank_int = int(rank)
-           except Exception as e:
-               logger.error(f"Error processing line {line_number}: '{line}' - {e}")
-               raise
-           bpe_dict[decoded_token] = rank_int
-       
-       return bpe_dict
 
 class Tokenizer:
   """
@@ -105,16 +40,8 @@ class Tokenizer:
 
   num_reserved_special_tokens = 256
 
-  pat_str = (
-    r"(?i:'s|'t|'re|'ve|'m|'ll|'d)"
-    r"|[^\r\n\p{L}\p{N}]?\p{L}+"
-    r"|\p{N}{1,3}"
-    r"| ?[^\s\p{L}\p{N}]+[\r\n]*"
-    r"|\s*[\r\n]+"
-    r"|\s+(?!\S)"
-    r"|\s+"
-)
-  
+  pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"  # noqa: E501
+
   def __init__(self, model_path: str):
     """
     Initializes the Tokenizer with a Tiktoken model.
@@ -124,8 +51,6 @@ class Tokenizer:
     """
     assert os.path.isfile(model_path), model_path
 
-    
-    
     mergeable_ranks = load_tiktoken_bpe(model_path)
     num_base_tokens = len(mergeable_ranks)
     special_tokens = [
