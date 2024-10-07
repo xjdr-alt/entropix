@@ -44,12 +44,12 @@ def main(weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('1B-Instruct')):
       print(p)
       tokens = tokenizer.encode(p,  bos=False, eos=False, allowed_special='all')
       initial_state = initialize(model_params, tokens, 100)
-      generate(xfmr_weights, model_params, tokenizer, initial_state, 100)
+      vanilla_generate(xfmr_weights, model_params, tokenizer, initial_state, 100, rng_key)
   else:
     print(prompt)
     tokens = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
     initial_state = initialize(model_params, tokens, 100)
-    generate(xfmr_weights, model_params, tokenizer, initial_state, 100)
+    vanilla_generate(xfmr_weights, model_params, tokenizer, initial_state, 100, rng_key)
 
 if __name__ == '__main__':
   tyro.cli(main)

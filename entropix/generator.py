@@ -78,8 +78,6 @@ def generate(xfmr_weights, model_params, tokenizer, initial_state, max_gen_len):
 
 
 def vanilla_generate(xfmr_weights, model_params, tokenizer, initial_state, n_gen_tokens, rng):
-    
-
     kvcache = initial_state['kvcache']
     attn_stats = initial_state['attn_stats']
     attn_mask = initial_state['attn_mask']
