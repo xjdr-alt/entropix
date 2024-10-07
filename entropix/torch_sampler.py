@@ -2,13 +2,8 @@ import torch
 import torch.nn.functional as F
 from typing import Tuple, Dict
 
-# Device selection, tree is like first apple silicion, then cuda, fallback is cpu.
-if torch.backends.mps.is_available():
-    device = torch.device("mps")
-elif torch.cuda.is_available():
-    device = torch.device("cuda")
-else:
-    device = torch.device("cpu")
+from entropix.torch_device import get_device
+device = get_device
 
 LN_2 = 0.69314718056  # ln(2) = 1.0 / LOG2_E
 
