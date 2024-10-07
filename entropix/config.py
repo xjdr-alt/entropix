@@ -1,5 +1,4 @@
 from typing import NamedTuple
-import jax
 
 class ScaledRopeParams(NamedTuple):
   scale_factor: int # = 8
