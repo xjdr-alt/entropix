@@ -25,6 +25,12 @@ This is the initial TODO list but we will add to it as we think of things.
 - Visualize entropy / varent via shadcn charts / color the text on the screen
 - add shadcn dashboard-03 (the playground) back in for not Claude.ai style conversations
 
+## Editor
+- I'm pretty sure i'm not doing Monaco as well as it can be done. Plugins, themes, etc
+- do something like https://github.com/Porter97/monaco-copilot-demo with base for completion
+- make it work like OAI canvas where you can ask for edits at point
+- Make sure Modal Editor and Artifact Code Editor both work but do not rely on eachother, cause ModalEditor needs to be simple
+
 ## Backend
 - Make a simple SSE client / server to hook up to Entropix generate loop
 - Create tool parser for:
