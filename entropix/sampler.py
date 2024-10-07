@@ -50,7 +50,7 @@ def calculate_metrics(logits: jnp.ndarray, attention_scores: jnp.ndarray) -> Dic
 
     attention_probs = jax.nn.softmax(attention_scores, axis=-1)
     attn_entropy = -jnp.sum(attention_probs * jnp.log2(jnp.clip(attention_probs, 1e-10, 1.0)), axis=-1)
-    attn_varentropy = jnp.var(attn_entropy, axis=-1)
+    attn_varentropy = jnp.var(attn_entropy, axis=1)
 
     mean_attention = jnp.mean(attention_probs, axis=1)
     agreement = jnp.mean(jnp.abs(attention_probs - mean_attention[:, None, :]), axis=(1, 2))
