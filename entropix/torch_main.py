@@ -2,8 +2,6 @@ from typing import NamedTuple, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
-import jax.numpy as jnp
-import numpy as np
 
 import math
 import tyro
@@ -18,7 +16,7 @@ from entropix.torch_model import xfmr
 from entropix.torch_weights import XfmrWeights, LayerWeights, load_weights
 from entropix.torch_sampler import sample
 from entropix.prompts import prompt, bp1
-from entropix.main import precompute_freqs_cis as jax_precompute_freqs_cis
+
 
 # Device selection, tree is like first apple silicion, then cuda, fallback is cpu.
 if torch.backends.mps.is_available():
