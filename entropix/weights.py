@@ -25,7 +25,7 @@ class XfmrWeights(NamedTuple):
   layer_weights: List[LayerWeights]
 
 
-def load_weights(ckpt_dir: Path = Path('weights/1B-Instruct'), n_layers: int = 16):
+def load_weights(ckpt_dir: Path, n_layers: int = 16):
   w = {}
   layer_weights = []
   device = jax.devices("gpu")[0]

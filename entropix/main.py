@@ -1,23 +1,26 @@
-from typing import NamedTuple, Optional, Tuple
+import math
+from pathlib import Path
 
 import jax
 import jax.numpy as jnp
-
-import math
 import tyro
 
 
 from pathlib import Path
 from functools import partial
 from entropix.stats import AttnStats
+
 from entropix.config import LLAMA_1B_PARAMS
 from entropix.kvcache import KVCache
 from entropix.model import xfmr
-from entropix.prompts import prompt, bp1
+from entropix.sampler import SamplerConfig, sample
+from entropix.prompts import create_prompts_from_csv, prompt
 from entropix.sampler import sample
 from entropix.tokenizer import Tokenizer
 from entropix.weights import load_weights
 from entropix.sampler import SamplerParams
+
+DEFAULT_WEIGHTS_PATH = Path(__file__).parent / '../weights'
 
 def apply_scaling(freqs: jax.Array):
   SCALE_FACTOR = 8
@@ -63,17 +66,11 @@ def build_attn_mask(seqlen: int, start_pos: int) -> jax.Array:
   return mask
 
 
-def main():
+def main(weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('1B-Instruct')):
   model_params = LLAMA_1B_PARAMS
   xfmr_weights = load_weights()
+
   tokenizer = Tokenizer('entropix/tokenizer.model')
-  sampler_params=SamplerParams(
-    temp=0.666, 
-    top_p=0.90, 
-    top_k=40, 
-    min_p=0.03, # Turn this down to 0.01 to reduce shoggoth symptoms
-    steer_tokens=jnp.array([1131]) # "..."
-  ) 
   raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
   base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False, allowed_special='all')
 
@@ -94,17 +91,17 @@ def main():
     print(tokenizer.decode([next_token.item()]), end='', flush=True)
     cur_pos = seqlen
     stop = jnp.array([128001, 128008, 128009])
-    #stop = jnp.array(tokenizer.stop_tokens)
+    sampler_cfg = SamplerConfig()
     while cur_pos < 8192:
       cur_pos += 1
-      logits, kvcache, scores, attn_stats = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache, attn_stats)
-      next_token = sample(sampler_params, gen_tokens, logits, attn_stats.scores[...,-1])
+      logits, kvcache, scores, stats = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache)
+      next_token = sample(gen_tokens, logits, scores)
       gen_tokens = jnp.concatenate((gen_tokens, next_token))
       print(tokenizer.decode(next_token.tolist()[0]), end='', flush=True)
       if jnp.isin(next_token, stop).any():
         break
 
-  generate(xfmr_weights, model_params, raw_tokens1, 100)
+  generate(xfmr_weights, model_params, raw_tokens1)
 
 if __name__ == '__main__':
   tyro.cli(main)
