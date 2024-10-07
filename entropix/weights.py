@@ -32,7 +32,6 @@ def load_weights(ckpt_dir: Path, n_layers: int = 16):
   for file in ckpt_dir.glob("*.npy"):
     name = '.'.join(str(file).split('/')[-1].split('.')[:-1])
     weight = jnp.load(file=file, mmap_mode='r', allow_pickle=True)
-    #w[name] = weight
     w[name] = jax.device_put(weight, device)
   for i in range(n_layers):
     layer_weights.append(LayerWeights(
