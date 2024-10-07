@@ -47,39 +47,13 @@ def attention(x: jax.Array, layer_weights: LayerWeights, model_params, cur_pos: 
 def feed_forward(x: jax.Array, layer_weights: LayerWeights) -> jax.Array:
  return jnp.dot(jax.nn.silu(jnp.dot(x, layer_weights.w1.T)) * jnp.dot(x, layer_weights.w3.T), layer_weights.w2.T)
 
-
 #@partial(jax.jit, static_argnames=("model_params", "cur_pos"))
-def xfmr_init_pass(xfmr_weights: XfmrWeights, model_params: ModelParams, tokens: jax.Array, freqs_cis: jax.Array, kvcache: KVCache, attn_mask: Optional[jax.Array]=None) -> Tuple[jax.Array, KVCache]:
+def xfmr(xfmr_weights: XfmrWeights, model_params: ModelParams, tokens: jax.Array, cur_pos: int, freqs_cis: jax.Array, kvcache: KVCache, attn_stats: AttnStats, attn_mask: Optional[jax.Array]=None) -> Tuple[jax.Array, KVCache]:
   h = xfmr_weights.tok_embeddings[tokens]
-  prompt_len=tokens.shape[1]
-  attn_stats = AttnStats.new(
-    bsz=tokens.shape[0],
-    n_layers=model_params.n_layers,
-    n_heads=model_params.n_local_heads
-  )
-  for i in range(model_params.n_layers):
-    norm_x = rms_norm(h, xfmr_weights.layer_weights[i].attention_norm)
-    h_attn, kvcache, scores = attention(norm_x, xfmr_weights.layer_weights[i], model_params, 0, i, freqs_cis, kvcache, attn_mask=attn_mask)
-    
-    h = h + h_attn
-    h = h + feed_forward(rms_norm(h, xfmr_weights.layer_weights[i].ffn_norm), xfmr_weights.layer_weights[i])
-  logits = jnp.dot(rms_norm(h, xfmr_weights.norm), xfmr_weights.output.T)
-  return logits, kvcache, scores, attn_stats
-
-
-#@partial(jax.jit, static_argnames=("model_params", "cur_pos"))
-def xfmr(xfmr_weights: XfmrWeights, model_params: ModelParams, tokens: jax.Array, cur_pos: int, freqs_cis: jax.Array, kvcache: KVCache, attn_mask: Optional[jax.Array]=None) -> Tuple[jax.Array, KVCache]:
-  h = xfmr_weights.tok_embeddings[tokens]
-  attn_stats = AttnStats.new(
-    bsz=tokens.shape[0],
-    seqlen=tokens.shape[1],
-    n_layers=model_params.n_layers,
-    n_heads=model_params.n_local_heads
-  )
   for i in range(model_params.n_layers):
     norm_x = rms_norm(h, xfmr_weights.layer_weights[i].attention_norm)
     h_attn, kvcache, scores = attention(norm_x, xfmr_weights.layer_weights[i], model_params, cur_pos, i, freqs_cis, kvcache, attn_mask=attn_mask)
-    attn_stats = attn_stats.update(scores,-1) if cur_pos==0 else attn_stats.update(scores[:,:,-1:,:], i)
+    attn_stats = attn_stats.update(scores,cur_pos,i)
     h = h + h_attn
     h = h + feed_forward(rms_norm(h, xfmr_weights.layer_weights[i].ffn_norm), xfmr_weights.layer_weights[i])
   logits = jnp.dot(rms_norm(h, xfmr_weights.norm), xfmr_weights.output.T)

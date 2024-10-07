@@ -9,7 +9,7 @@ import tyro
 
 from pathlib import Path
 from functools import partial
-
+from entropix.stats import AttnStats
 from entropix.config import LLAMA_1B_PARAMS
 from entropix.kvcache import KVCache
 from entropix.model import xfmr
@@ -78,15 +78,17 @@ def main():
   base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False, allowed_special='all')
 
   # Create the batch of tokens
-  def generate(xfmr_weights, model_params, tokens):
+  def generate(xfmr_weights, model_params, tokens, max_gen_len):
     gen_tokens = None
     cur_pos = 0
     tokens = jnp.array([tokens], jnp.int32)
     bsz, seqlen = tokens.shape
+    max_total_len=seqlen + max_gen_len
     attn_mask = build_attn_mask(seqlen, cur_pos)
     freqs_cis = precompute_freqs_cis(model_params.head_dim, model_params.max_seq_len, model_params.rope_theta, model_params.use_scaled_rope)
-    kvcache = KVCache.new(model_params, bsz)
-    logits, kvcache, _, _ = xfmr(xfmr_weights, model_params, tokens, cur_pos, freqs_cis[:seqlen], kvcache, attn_mask=attn_mask)
+    kvcache = KVCache.new(model_params, bsz, max_total_len)
+    attn_stats = AttnStats.new(model_params, bsz, max_total_len)
+    logits, kvcache, _, _ = xfmr(xfmr_weights, model_params, tokens, cur_pos, freqs_cis[:seqlen], kvcache, attn_stats, attn_mask=attn_mask)
     next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
     gen_tokens = next_token
     print(tokenizer.decode([next_token.item()]), end='', flush=True)
@@ -95,14 +97,14 @@ def main():
     #stop = jnp.array(tokenizer.stop_tokens)
     while cur_pos < 8192:
       cur_pos += 1
-      logits, kvcache, scores, stats = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache)
-      next_token = sample(sampler_params, gen_tokens, logits, scores)
+      logits, kvcache, scores, attn_stats = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache, attn_stats)
+      next_token = sample(sampler_params, gen_tokens, logits, attn_stats.scores[...,-1])
       gen_tokens = jnp.concatenate((gen_tokens, next_token))
       print(tokenizer.decode(next_token.tolist()[0]), end='', flush=True)
       if jnp.isin(next_token, stop).any():
         break
 
-  generate(xfmr_weights, model_params, raw_tokens1)
+  generate(xfmr_weights, model_params, raw_tokens1, 100)
 
 if __name__ == '__main__':
   tyro.cli(main)
