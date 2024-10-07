@@ -11,7 +11,7 @@ from entropix.torch_stats import AttnStats
 DEFAULT_MASK_VALUE = -0.7 * float(torch.finfo(torch.float32).max)
 
 from entropix.torch_device import get_device
-device = get_device
+device = get_device()
 
 #print(f"Using device: {device}")
 

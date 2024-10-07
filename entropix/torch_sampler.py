@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from typing import Tuple, Dict
 
 from entropix.torch_device import get_device
-device = get_device
+device = get_device()
 
 LN_2 = 0.69314718056  # ln(2) = 1.0 / LOG2_E
 
