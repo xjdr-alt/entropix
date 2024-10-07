@@ -53,14 +53,12 @@ def _sample(logits: torch.Tensor, temperature=0.666, top_p=0.90, top_k=27, min_p
 
 def calculate_metrics(logits: torch.Tensor, attention_scores: torch.Tensor) -> Dict[str, torch.Tensor]:
     entropy, varentropy = calculate_varentropy_logsoftmax(logits)
-
     attention_probs = F.softmax(attention_scores, dim=-1)
     attn_entropy = -torch.sum(attention_probs * torch.log2(torch.clamp(attention_probs, 1e-10, 1.0)), dim=-1)
     attn_varentropy = torch.var(attn_entropy, dim=-1)
     
     # Add a small epsilon to avoid NaN when all values are the same
     attn_varentropy = torch.where(torch.isnan(attn_varentropy), torch.zeros_like(attn_varentropy), attn_varentropy)
-
     mean_attention = torch.mean(attention_probs, dim=1)
     agreement = torch.mean(torch.abs(attention_probs - mean_attention.unsqueeze(1)), dim=(1, 2))
 

@@ -54,7 +54,7 @@ poetry run python download_weights.py --model-id meta-llama/Llama-3.2-1B-Instruc
 download tokenizer.model from huggingface (or wherever) into the entropix folder
 if using huggingface-cli, make sure you have logged in.
 ```bash
-poetry run huggingface-cli download meta-llama/Meta-Llama-3.1-8B-Instruct --include "original/tokenizer.model" --local-dir entropix/tokenizer.model
+poetry run bash -c "huggingface-cli download meta-llama/Llama-3.2-1B-Instruct original/tokenizer.model --local-dir entropix && mv entropix/original/tokenizer.model entropix/ && rmdir entropix/original"
 ```
 
 run it (jax)
@@ -69,4 +69,4 @@ run it (torch)
 
 
 NOTES:
-If youre using using the torch parts only, you can `export XLA_PYTHON_CLIENT_PREALLOCATE=false` to prevent jax from doing jax things and hogging your VRAM
+If you're using using the torch parts only, you can `export XLA_PYTHON_CLIENT_PREALLOCATE=false` to prevent jax from doing jax things and hogging your VRAM
