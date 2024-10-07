@@ -17,7 +17,7 @@ from entropix.prompts import prompt, bp1
 from entropix.sampler import sample
 from entropix.tokenizer import Tokenizer
 from entropix.weights import load_weights
-
+from entropix.sampler import SamplerParams
 
 def apply_scaling(freqs: jax.Array):
   SCALE_FACTOR = 8
@@ -66,8 +66,14 @@ def build_attn_mask(seqlen: int, start_pos: int) -> jax.Array:
 def main():
   model_params = LLAMA_1B_PARAMS
   xfmr_weights = load_weights()
-
   tokenizer = Tokenizer('entropix/tokenizer.model')
+  sampler_params=SamplerParams(
+    temp=0.666, 
+    top_p=0.90, 
+    top_k=40, 
+    min_p=0.03, # Turn this down to 0.01 to reduce shoggoth symptoms
+    steer_tokens=jnp.array([1131]) # "..."
+  ) 
   raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
   base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False, allowed_special='all')
 
@@ -79,7 +85,7 @@ def main():
     bsz, seqlen = tokens.shape
     attn_mask = build_attn_mask(seqlen, cur_pos)
     freqs_cis = precompute_freqs_cis(model_params.head_dim, model_params.max_seq_len, model_params.rope_theta, model_params.use_scaled_rope)
-    kvcache = KVCache.new(model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim)
+    kvcache = KVCache.new(model_params, bsz)
     logits, kvcache, _, _ = xfmr(xfmr_weights, model_params, tokens, cur_pos, freqs_cis[:seqlen], kvcache, attn_mask=attn_mask)
     next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
     gen_tokens = next_token
@@ -90,7 +96,7 @@ def main():
     while cur_pos < 8192:
       cur_pos += 1
       logits, kvcache, scores, stats = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache)
-      next_token = sample(gen_tokens, logits, scores)
+      next_token = sample(sampler_params, gen_tokens, logits, scores)
       gen_tokens = jnp.concatenate((gen_tokens, next_token))
       print(tokenizer.decode(next_token.tolist()[0]), end='', flush=True)
       if jnp.isin(next_token, stop).any():
