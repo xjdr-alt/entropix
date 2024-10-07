@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { Globe, Terminal } from 'lucide-react';
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
-import { cn } from '@/lib/utils';
+import { cn } from '@/library/utils';
 
 interface TabsProps {
   artifacts: ArtifactContent[];
