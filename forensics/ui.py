@@ -12,6 +12,9 @@ from entropix.model import xfmr
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from entropix.generator import generate
+from entropix.main import DEFAULT_WEIGHTS_PATH
+from entropix.sampler import SamplerConfig
+from entropix.stats import AttnStats
 
 import numpy as np
 
@@ -25,7 +28,7 @@ class TextCompletionUI:
 
         # Initialize model components
         self.model_params = LLAMA_1B_PARAMS
-        self.xfmr_weights = load_weights('./weights')
+        self.xfmr_weights = load_weights(DEFAULT_WEIGHTS_PATH.joinpath('1B-Base'))
         self.tokenizer = Tokenizer('./entropix/tokenizer.model')
         
         # Create UI elements
@@ -103,59 +106,42 @@ class TextCompletionUI:
             self.generation_thread.join()
         self.master.destroy()
 
-    def generate_text(self, prompt):
+    def generate_text(self, prompt, max_gen_len=100):
         model_params = self.model_params
         xfmr_weights = self.xfmr_weights
         tokenizer = self.tokenizer
 
         raw_tokens = tokenizer.encode(prompt, bos=False, eos=False)
         tokens = jnp.array([raw_tokens], jnp.int32)
-        seqlen = tokens.shape[1]
         cur_pos = 0
+        bsz, prompt_len = tokens.shape
+        max_total_len = prompt_len + max_gen_len
         # Build the initial attention mask
-        attn_mask = build_attn_mask(seqlen, cur_pos)
-
+        attn_mask = build_attn_mask(prompt_len, cur_pos)
         freqs_cis = precompute_freqs_cis(model_params)
-        kvcache = KVCache.new(
-            layers=model_params.n_layers,
-            bsz=tokens.shape[0],
-            max_seq_len=model_params.max_seq_len,
-            kv_heads=model_params.n_local_kv_heads,
-            head_dim=model_params.head_dim
-        )
-
-        logits, kvcache, attn_stats = xfmr(
-            xfmr_weights=xfmr_weights,
-            model_params=model_params,
-            tokens=tokens,
-            cur_pos=0,
-            freqs_cis=freqs_cis[:seqlen],
-            kvcache=kvcache,
-            attn_mask=attn_mask
-        )
+        kvcache = KVCache.new(model_params, bsz, max_total_len)
+        attn_stats = AttnStats.new(model_params, bsz, max_total_len)
+        logits, kvcache, _, _ = xfmr(xfmr_weights, model_params, tokens, cur_pos, freqs_cis[:prompt_len], kvcache, attn_stats, attn_mask=attn_mask)
         next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
-        cur_pos = seqlen
+        gen_tokens = next_token
+        print(tokenizer.decode([next_token.item()]), end='', flush=True)
+        cur_pos = prompt_len
         stop = jnp.array([128001, 128008, 128009])
-
-        while cur_pos < 2048 and not self.stop_generation:
+        sampler_cfg = SamplerConfig()
+        token_text = tokenizer.decode(next_token.tolist()[0])
+        self.master.after(0, self.update_ui, token_text)
+        # Aggregate entropy across layers (e.g., take mean)
+        aggregated_entropy = jnp.mean(attn_stats.avg_entropy[0], axis=-1)  # Shape: (seqlen,)
+        self.entropy_values += aggregated_entropy.tolist()
+        while cur_pos < 8192 and not self.stop_generation:
             cur_pos += 1
             # Build the attention mask for the new sequence length
-            logits, kvcache, attn_stats = xfmr(
-                xfmr_weights=xfmr_weights,
-                model_params=model_params,
-                tokens=next_token,
-                cur_pos=cur_pos,
-                freqs_cis=freqs_cis[cur_pos:cur_pos+1],
-                kvcache=kvcache
-            )
-
-            # Append all entropy values for this step
+            logits, kvcache, scores, attn_stats = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache, attn_stats)
             self.entropy_values += attn_stats.avg_entropy[0].tolist()
-            next_token = sample(logits)
+            next_token = sample(gen_tokens, logits, scores, cfg=sampler_cfg)
+            gen_tokens = jnp.concatenate((gen_tokens, next_token))
             token_text = tokenizer.decode(next_token.tolist()[0])
-
             self.master.after(0, self.update_ui, token_text)
-
             if jnp.isin(next_token, stop).any():
                 break
 
@@ -197,6 +183,7 @@ class TextCompletionUI:
             window_fn = np.hamming(window_size)
             for i in range(0, len(entropy_array) - window_size + 1, step_size):
                 window = entropy_array[i:i + window_size]
+                print(window.shape, window_fn.shape)
                 windowed = window * window_fn
                 fft_result = np.fft.fft(windowed)
                 magnitudes = np.abs(fft_result)

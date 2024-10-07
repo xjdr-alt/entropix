@@ -56,13 +56,7 @@ if using huggingface-cli, make sure you have logged in.
 ```bash
 poetry run huggingface-cli download meta-llama/Meta-Llama-3.1-8B-Instruct --include "original/tokenizer.model" --local-dir entropix/tokenizer.model
 ```
-e.g.
-```bash
-cd entropix
-huggingface-cli download meta-llama/Meta-Llama-3.1-8B-Instruct --include "original/tokenizer.model" --local-dir ./llama3.1-tokenizer
-```
 
-run it
 run it
 ```bash
  PYTHONPATH=. poetry run python entropix/main.py

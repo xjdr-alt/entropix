@@ -2,7 +2,7 @@ from typing import Dict
 import chex
 import jax.numpy as jnp
 from entropix.utils import calculate_varentropy_logsoftmax, multinomial_sample_one
-
+import jax
 
 def _sample( logits: jax.Array, *, temperature: float | jax.Array, top_p: float | jax.Array, top_k: int | jax.Array, min_p: float | jax.Array,
             key=jax.random.PRNGKey(1337),) -> jax.Array:
