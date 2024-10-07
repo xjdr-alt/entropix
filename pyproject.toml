@@ -12,11 +12,12 @@ jaxlib = {version = "^0.4.33", extras = ["cpu"], markers = "platform_system == '
 flax = "^0.9.0"
 tiktoken = "0.4.0"
 pydantic = "^2.9.2"
-tyro = "^0.8.11"
 blobfile = "^3.0.0"
 ml-dtypes = "^0.5.0"
 rich = "^13.8.1"
 torch = {version = "^2.4.1", source = "pytorch", extras = ["+cu124"], markers = "platform_system != 'Darwin'"}
+chex = "^0.1.87"
+tyro = "^0.8.11"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.2"
