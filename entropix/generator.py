@@ -1,14 +1,16 @@
 from entropix.model import KVCache, xfmr
 from entropix.rope import precompute_freqs_cis
 from entropix.sampler import sample, SamplerConfig
+from entropix.config import ModelParams
 from entropix.stats import AttnStats
 from entropix.sampler import SamplerConfig
 from entropix.model import xfmr
 from entropix.sampler import _sample
+from entropix.utils import calculate_varentropy_logsoftmax
+
 import jax.numpy as jnp
 import jax
 from typing import NamedTuple
-
 class InitialState(NamedTuple):
     tokens: jax.Array
     kvcache: KVCache
@@ -76,7 +78,6 @@ def generate(xfmr_weights, model_params, tokenizer, initial_state, max_gen_len):
       if jnp.isin(next_token, stop_tokens).any():
         break
 
-
 def vanilla_generate(xfmr_weights, model_params, tokenizer, initial_state, n_gen_tokens, rng):
     kvcache = initial_state['kvcache']
     attn_stats = initial_state['attn_stats']
@@ -104,3 +105,31 @@ def vanilla_generate(xfmr_weights, model_params, tokenizer, initial_state, n_gen
       print(tokenizer.decode(next_token.tolist()[0]), end='', flush=True)
     return gen_tokens, logits_cache, attn_stats
 
+def score_N(xfmr_weights: jax.Array, model_params: ModelParams, tokens: jax.Array, start_pos: int, N:int):
+    """
+    This function calculates a model's scoring of a (batch of) sequence(s) of tokens in various ways.
+
+    tokens: jax.Array, shape (batch_size, tokens.shape[1], N)
+    start_pos: int, the position in the sequence to start scoring
+    N: int, the number of sequences to score
+    """
+    initial_state = initialize(model_params, tokens, 1)
+    seqlen = tokens.shape[1]
+    logits, _, scores, attn_stats = xfmr(
+        xfmr_weights=xfmr_weights,
+        model_params=model_params,
+        cur_pos=0, 
+        tokens=initial_state['tokens'],
+        freqs_cis=initial_state['freqs_cis'][:seqlen],
+        kvcache=initial_state['kvcache'],
+        attn_stats=initial_state['attn_stats'],
+        attn_mask=initial_state['attn_mask']
+    )
+    shape = logits.shape # (batch_size, tokens.shape[1]*N, vocab_size)
+    logits = logits.reshape(tokens.shape[0], tokens.shape[1], N, model_params.vocab_size).transpose(0, 1, 3, 2) # (batch_size, tokens.shape[1], vocab_size, N) <--(batch_size, tokens.shape[1]*N, vocab_size)
+    log_probs = jax.nn.log_softmax(logits, axis=2)
+    log_joint_probs = log_probs.sum(axis=1) 
+    joint_entropy, joint_varentropy = calculate_varentropy_logsoftmax(log_joint_probs, axis=-1) # (batch_size, tokens.shape[1], vocab_size)
+    log_likelihood = jnp.take_along_axis(log_probs[:, start_pos-1:-1,:], tokens[:, start_pos:, :, None], axis=-1).squeeze(-1) # (batch_size, tokens.shape[1]-start_pos, N)
+    cross_entropy = log_likelihood.sum(axis=1) # (batch_size, N)
+    return cross_entropy, joint_entropy, joint_varentropy
