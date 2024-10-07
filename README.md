@@ -67,6 +67,15 @@ run it (torch)
  PYTHONPATH=. poetry run python entropix/torch_main.py
 ```
 
-
 NOTES:
 If you're using using the torch parts only, you can `export XLA_PYTHON_CLIENT_PREALLOCATE=false` to prevent jax from doing jax things and hogging your VRAM
+
+## Tips and Tricks
+
+### Jit is Too Slow
+
+For rapid iteration, `jax.jit` might be too slow. In this case, set:
+```
+JAX_DISABLE_JIT=True
+```
+in your environment to disable it.
