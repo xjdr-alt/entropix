@@ -3,8 +3,6 @@ from typing import Optional, Tuple
 import jax
 import jax.numpy as jnp
 
-from functools import partial
-
 from entropix.config import ModelParams
 from entropix.kvcache import KVCache
 from entropix.stats import AttnStats

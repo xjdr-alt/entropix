@@ -99,7 +99,6 @@ class SamplerConfig:
     ada_score_agree: float = 0.5
     ada_score_int: float = 0.6
 
-
 def sample(gen_tokens: jax.Array, logits: jax.Array, attention_scores: jax.Array, cfg: SamplerConfig,
            clarifying_question_token: int = 2564, key=jax.random.PRNGKey(1337)) -> jax.Array:
 
