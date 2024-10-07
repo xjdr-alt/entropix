@@ -101,8 +101,8 @@ def adaptive_sample(logits: jax.Array, metrics: Dict[str, jnp.ndarray],
 def sample(sampler_params: SamplerParams, gen_tokens: jax.Array, logits: jax.Array, scores: jax.Array, key=jax.random.PRNGKey(1337)) -> jax.Array:
     metrics = calculate_metrics(logits, scores)
     #print(f'{metrics=}')
-    ent, vent = metrics["logits_entropy"], metrics["logits_varentropy"]
     temp, top_p, top_k, min_p = sampler_params.temp, sampler_params.top_p, sampler_params.top_k, sampler_params.min_p
+    ent, vent = metrics["logits_entropy"], metrics["logits_varentropy"]
     attn_ent, attn_vent = metrics["attn_entropy"], metrics["attn_varentropy"]
     agreement = metrics["agreement"]
     interaction_strength = metrics["interaction_strength"]

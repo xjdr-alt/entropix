@@ -3,6 +3,7 @@ import jax
 import jax.numpy as jnp
 
 class AttnStats(NamedTuple):
+  attn_stats: jax.Array  # (bsz, seqlen, n_layers, num_heads, seqlen+cache_len)
   entropy: jax.Array  # (bsz, seqlen, n_layers, num_heads)
   varentropy: jax.Array  # (bsz, seqlen, n_layers, num_heads)
 
@@ -27,6 +28,7 @@ class AttnStats(NamedTuple):
     new_entropy = -jnp.sum(jnp.where(probs > 0, probs * jnp.log(probs), 0), axis=-1)
     new_varentropy = jnp.sum(probs * (jnp.log(probs) + new_entropy[..., None])**2, axis=-1)    
     return self._replace(
+        scores=scores,
         entropy=self.entropy.at[:, :, layer_idx, :].set(new_entropy.transpose(0,2,1)),
         varentropy=self.varentropy.at[:, :, layer_idx, :].set(new_varentropy.transpose(0,2,1))
     )
