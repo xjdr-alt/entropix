@@ -6,8 +6,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-import ml_dtypes
-
 from pathlib import Path
 
 class LayerWeights(NamedTuple):
@@ -28,8 +26,8 @@ class XfmrWeights(NamedTuple):
   layer_weights: List[LayerWeights]
 
 def compare_outputs(torch_output: torch.Tensor, jax_output: jax.Array, atol: float = 1e-5, rtol: float = 1e-8) -> None:
-  jax_output_np = np.array(jax_output)
-  torch_output_np = torch_output.cpu().view(dtype=torch.uint16).numpy().view(ml_dtypes.bfloat16)
+  jax_output_np = np.array(jax_output).astype(np.float32)
+  torch_output_np = torch_output.cpu().float().numpy()
 
   try:
     np.testing.assert_allclose(torch_output_np, jax_output_np, atol=atol, rtol=rtol)
