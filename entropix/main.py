@@ -48,7 +48,7 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 500000.0, use_scaled
     freqs = apply_scaling(freqs)
   t = jnp.arange(end, dtype=dtype)
   freqs = jnp.outer(t, freqs)
-  return jnp.exp(1j * freqs)
+  return jnp.stack([jnp.cos(freqs), jnp.sin(freqs)], axis=-1)
 
 
 def build_attn_mask(seqlen: int, start_pos: int) -> jax.Array:
