@@ -1,5 +1,3 @@
-from typing import Tuple, Optional
-
 import math
 import torch
 import torch.nn as nn
@@ -12,19 +10,31 @@ from entropix.torch_stats import AttnStats
 
 DEFAULT_MASK_VALUE = -0.7 * float(torch.finfo(torch.float32).max)
 
+# Device selection, tree is like first apple silicion, then cuda, fallback is cpu.
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+elif torch.cuda.is_available():
+    device = torch.device("cuda")
+else:
+    device = torch.device("cpu")
+
+#print(f"Using device: {device}")
+
+from typing import Tuple, Optional
+
 def rms_norm(x: torch.Tensor, w: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
   return w * (x * torch.rsqrt(torch.pow(x, 2).mean(-1, keepdim=True) + eps))
 
-def apply_rotary_emb(xq: torch.Tensor, xk: torch.Tensor, freqs_cis: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+def apply_rotary_emb(xq: torch.Tensor, xk: torch.Tensor, freqs_cis: torch.Tensor, dtype: torch.dtype = torch.float32) -> Tuple[torch.Tensor, torch.Tensor]:
     reshape_xq = xq.float().reshape(*xq.shape[:-1], -1, 2)
     reshape_xk = xk.float().reshape(*xk.shape[:-1], -1, 2)
-    xq_ = torch.view_as_complex(reshape_xq)
-    xk_ = torch.view_as_complex(reshape_xk)
+    xq_ = torch.complex(reshape_xq[..., 0], reshape_xq[..., 1])
+    xk_ = torch.complex(reshape_xk[..., 0], reshape_xk[..., 1])
     xq_out = xq_ * freqs_cis.unsqueeze(0).unsqueeze(2)
     xk_out = xk_ * freqs_cis.unsqueeze(0).unsqueeze(2)
-    xq_out = torch.view_as_real(xq_out).flatten(3)
-    xk_out = torch.view_as_real(xk_out).flatten(3)
-    return xq_out.type_as(xq), xk_out.type_as(xk)
+    xq_out = torch.stack((xq_out.real, xq_out.imag), dim=-1).reshape(*xq_out.shape[:-1], -1)
+    xk_out = torch.stack((xk_out.real, xk_out.imag), dim=-1).reshape(*xk_out.shape[:-1], -1)
+    return xq_out.to(dtype), xk_out.to(dtype)
 
 def attention(x: torch.Tensor, layer_weights: LayerWeights, model_params, cur_pos: int, layer_idx: int, freqs_cis: torch.Tensor, kvcache: KVCache, attn_mask: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, KVCache, torch.Tensor]:
     bsz, _, _ = x.shape
@@ -44,7 +54,7 @@ def attention(x: torch.Tensor, layer_weights: LayerWeights, model_params, cur_po
         scores = scores + attn_mask
     mask = torch.where(scores != 0.0, scores, DEFAULT_MASK_VALUE)
     padded_logits = torch.where((mask >= DEFAULT_MASK_VALUE * 0.5), scores, DEFAULT_MASK_VALUE)
-    scores = F.softmax(padded_logits, dim=-1).type_as(x)
+    scores = F.softmax(padded_logits, dim=-1).to(torch.float32)
     output = torch.matmul(scores, values)
     output = output.transpose(1, 2).reshape(xq.shape[0], xq.shape[2], -1)
     out = F.linear(output, layer_weights.wo)
