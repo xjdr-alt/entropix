@@ -20,6 +20,7 @@ chex = "^0.1.87"
 tyro = "^0.8.11"
 fastapi = "^0.115.0"
 uvicorn = "^0.31.0"
+uvloop = "^0.20.0"
 
 
 [tool.poetry.group.dev.dependencies]
