@@ -25,7 +25,7 @@ def multinomial_sample_one(probs_sort: jax.Array, key) -> jax.Array:
 use_jax_top_k = False
 
 def _top_k(x, k):
-    if not use_jax_top_k:
+    if use_jax_top_k:
         return jax.lax.top_k(x, k=k)
     # jax.lax.top_k fails when using jax-metal, so reimplement it.
     # You can't backprop through this version but it doesn't matter
