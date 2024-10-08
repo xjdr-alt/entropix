@@ -8,6 +8,7 @@ import ArtifactActions from './Actions'
 import ArtifactSidebar from './Sidebar'
 import Code from './Code'
 import TextPreview from './TextPreview'
+import usePyodide from '@/hooks/usePyodide'
 
 interface ArtifactContent {
   id: string;
@@ -74,6 +75,7 @@ export default function Artifacts({
   const [logEntries, setLogEntries] = useState<{[key: string]: OutputEntry[]}>({});
   const [copied, setCopied] = useState(false);
   const { resolvedTheme } = useTheme();
+  const { pyodide } = usePyodide();
 
   const activeArtifactData = artifacts.find(a => a.id === activeArtifact);
 
@@ -90,20 +92,60 @@ export default function Artifacts({
     }
   };
 
-  const runCode = () => {
+  const runCode = async () => {
     if (activeArtifactData?.type === 'code') {
-      onRun(activeArtifactData.id, activeArtifactData.content);
-      setLogEntries(prev => ({
-        ...prev,
-        [activeArtifactData.id]: [
-          ...(prev[activeArtifactData.id] || []),
-          {
-            timestamp: new Date().toISOString(),
-            content: `Running ${activeArtifactData.name}...`,
-            type: 'info'
-          }
-        ]
-      }));
+      if (activeArtifactData.language === 'python' && pyodide) {
+        try {
+          // Capture console output
+          let output = '';
+          const originalConsoleLog = console.log;
+          console.log = (...args) => {
+            output += args.join(' ') + '\n';
+            originalConsoleLog.apply(console, args);
+          };
+
+          const result = await pyodide.runPython(activeArtifactData.content);
+          
+          // Restore original console.log
+          console.log = originalConsoleLog;
+
+          setLogEntries(prev => ({
+            ...prev,
+            [activeArtifactData.id]: [
+              ...(prev[activeArtifactData.id] || []),
+              {
+                id: crypto.randomUUID(),
+                timestamp: new Date().toISOString(),
+                content: output.trim(),
+                type: 'output'
+              },
+              // Only add the result if it's not undefined
+              ...(result !== undefined ? [{
+                id: crypto.randomUUID(),
+                timestamp: new Date().toISOString(),
+                content: `Result: ${result}`,
+                type: 'output'
+              }] : [])
+            ]
+          }));
+        } catch (error) {
+          setLogEntries(prev => ({
+            ...prev,
+            [activeArtifactData.id]: [
+              ...(prev[activeArtifactData.id] || []),
+              {
+                id: crypto.randomUUID(),
+                timestamp: new Date().toISOString(),
+                content: `Error: ${error.message}`,
+                type: 'error'
+              }
+            ]
+          }));
+        }
+      } else {
+        // Handle other languages or call the original onRun function
+        onRun(activeArtifactData.id, activeArtifactData.content);
+      }
       setShowLogs(true);
     }
   };
