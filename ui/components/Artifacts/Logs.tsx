@@ -13,20 +13,14 @@ interface OutputEntry {
   type: 'log' | 'info' | 'warning' | 'error' | 'success' | 'output'
 }
 
-export default function Logs() {
+interface LogsProps {
+  entries: OutputEntry[];
+}
+
+export default function Logs({ entries }: LogsProps) {
   const outputRef = useRef<HTMLDivElement>(null)
-  const [entries, setEntries] = useState<OutputEntry[]>([])
   const [isScrolledToBottom, setIsScrolledToBottom] = useState(true)
   const [isMinimized, setIsMinimized] = useState(false)
-
-  const addEntry = useCallback((content: string, type: OutputEntry['type'] = 'output') => {
-    setEntries(prevEntries => [...prevEntries, {
-      id: crypto.randomUUID(),
-      timestamp: new Date().toISOString(),
-      content,
-      type,
-    }])
-  }, [])
 
   useEffect(() => {
     if (outputRef.current && isScrolledToBottom) {
@@ -38,39 +32,6 @@ export default function Logs() {
     const { scrollTop, scrollHeight, clientHeight } = event.currentTarget
     setIsScrolledToBottom(scrollHeight - scrollTop === clientHeight)
   }, [])
-
-  // Simulating entries for demonstration
-  useEffect(() => {
-    const types: OutputEntry['type'][] = ['log', 'info', 'warning', 'error', 'success', 'output']
-    const messages = [
-      "Initializing quantum neural network...",
-      "Syncing with decentralized cloud nodes...",
-      "Optimizing AI-driven microservices...",
-      "Establishing secure blockchain connection...",
-      "Deploying edge computing resources...",
-      "Received request: GET /api/v3/quantum-data",
-      "Error: Temporal anomaly detected in data stream",
-      "Successfully processed 1 million records in 0.1 seconds",
-      "> npm run future",
-      "$ next quantum-dev",
-      "- Quantum server ready on 0.0.0.0:3000, multiverse url: http://localhost:3000"
-    ]
-
-    const addRandomEntry = () => {
-      const randomType = types[Math.floor(Math.random() * types.length)]
-      const randomMessage = messages[Math.floor(Math.random() * messages.length)]
-      addEntry(randomMessage, randomType)
-    }
-
-    // Add initial entries
-    for (let i = 0; i < 5; i++) {
-      addRandomEntry()
-    }
-
-    const timer = setInterval(addRandomEntry, 2000)
-
-    return () => clearInterval(timer)
-  }, [addEntry])
 
   const typeStyles = {
     error: 'bg-red-500/20 text-red-700 dark:text-red-300 border-red-500/30',
@@ -104,8 +65,12 @@ export default function Logs() {
             >
               <div className="font-mono text-sm space-y-3">
                 <AnimatePresence>
-                  {entries.map((entry) => (
-                    <LogEntry key={entry.id} entry={entry} typeStyles={typeStyles} />
+                  {entries.map((entry, index) => (
+                    <LogEntry
+                      key={entry.id || `entry-${index}`}
+                      entry={entry}
+                      typeStyles={typeStyles}
+                    />
                   ))}
                 </AnimatePresence>
               </div>
