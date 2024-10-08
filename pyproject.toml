@@ -15,7 +15,7 @@ pydantic = "^2.9.2"
 blobfile = "^3.0.0"
 ml-dtypes = "^0.5.0"
 rich = "^13.8.1"
-torch = {version = "^2.4.1", source = "pytorch", extras = ["+cu124"], optional = true, markers = "platform_system != 'Darwin'"}
+torch = {version = "^2.4.1", extras = ["+cu124"], optional = true, markers = "platform_system != 'Darwin'"}
 chex = "^0.1.87"
 tyro = "^0.8.11"
 
@@ -31,11 +31,6 @@ huggingface-hub = {extras = ["cli"], version = "^0.25.1"}
 torch = "^2.4.1"
 fairscale = "^0.4.13"
 
-
-[[tool.poetry.source]]
-name = "pytorch"
-url = "https://download.pytorch.org/whl/cu124"
-priority = "explicit"
 
 [build-system]
 requires = ["poetry-core"]
