@@ -17,7 +17,7 @@ ml-dtypes = "^0.5.0"
 rich = "^13.8.1"
 torch = [
     {version = "^2.4.1+cu124", source = "pytorch", markers = "platform_machine != 'Darwin'"},
-    {version = "^2.4.1", source = "pytorch", markers = "platform_machine != 'Darwin'"}
+    {version = "^2.4.1", source = "pytorch"}
 ]
 chex = "^0.1.87"
 tyro = "^0.8.11"
