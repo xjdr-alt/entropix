@@ -54,7 +54,7 @@ def attention(x: torch.Tensor, layer_weights: LayerWeights, model_params, cur_po
         scores = scores + attn_mask
     mask = torch.where(scores != 0.0, scores, DEFAULT_MASK_VALUE)
     padded_logits = torch.where((mask >= DEFAULT_MASK_VALUE * 0.5), scores, DEFAULT_MASK_VALUE)
-    scores = F.softmax(padded_logits, dim=-1).to(torch.float32)
+    scores = F.softmax(padded_logits, dim=-1).to(x.dtype)
     output = torch.matmul(scores, values)
     output = output.transpose(1, 2).reshape(xq.shape[0], xq.shape[2], -1)
     out = F.linear(output, layer_weights.wo)

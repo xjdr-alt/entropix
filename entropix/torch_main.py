@@ -15,9 +15,8 @@ from entropix.torch_kvcache import KVCache
 from entropix.torch_model import xfmr
 from entropix.torch_weights import XfmrWeights, LayerWeights, load_weights
 from entropix.torch_sampler import sample
-from entropix.prompts import prompt, bp1
+from entropix.prompts import create_prompts_from_csv, prompt, bp1
 
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 # Device selection, tree is like first apple silicion, then cuda, fallback is cpu.
@@ -93,12 +92,7 @@ def main():
   with torch.inference_mode():
     model_params = LLAMA_1B_PARAMS
     xfmr_weights = load_weights()
-
     tokenizer = Tokenizer('entropix/tokenizer.model')
-    raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
-    #this is not used in this script, but can be used to generate base_raw_tokens1
-    base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False, allowed_special='all')
-
 
     def generate(xfmr_weights, model_params, tokens):
       gen_tokens = None
@@ -107,7 +101,7 @@ def main():
       bsz, seqlen = tokens.shape
       attn_mask = build_attn_mask(seqlen, cur_pos)
       freqs_cis = precompute_freqs_cis(model_params.head_dim, model_params.max_seq_len, model_params.rope_theta, model_params.use_scaled_rope)
-      kvcache = KVCache.new(model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim).to(DEVICE)
+      kvcache = KVCache.new(model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim).to(device)
       logits, kvcache, _, _ = xfmr(xfmr_weights, model_params, tokens, cur_pos, freqs_cis[:seqlen], kvcache, attn_mask=attn_mask)
       next_token = torch.argmax(logits[:, -1], dim=-1, keepdim=True).to(torch.int32)
       gen_tokens = next_token
@@ -123,8 +117,21 @@ def main():
         if torch.isin(next_token, stop).any():
           break
 
-    print(prompt)
-    generate(xfmr_weights, model_params, raw_tokens1)
+    csv_path = Path('entropix/prompts.csv')
+    prompts = create_prompts_from_csv(csv_path)
+    PROMPT_TEST = False
+
+    if PROMPT_TEST:
+      for prompt in prompts:
+        print(prompt)
+        tokens = tokenizer.encode(prompt, bos=False, eos=False, allowed_special='all')
+        generate(xfmr_weights, model_params, tokens)
+    else:
+        raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
+        #this is not used in this script, but can be used to generate base_raw_tokens1
+        base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False, allowed_special='all')
+        print(prompt)
+        generate(xfmr_weights, model_params, raw_tokens1)
 
 if __name__ == '__main__':
   tyro.cli(main)
