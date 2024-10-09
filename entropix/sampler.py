@@ -20,9 +20,12 @@ def multinomial_sample_one(probs_sort: jax.Array, key) -> jax.Array:
     q = jax.random.exponential(key=key, shape=probs_sort.shape)
     return jnp.argmax(probs_sort / q, axis=-1, keepdims=True).astype(jnp.int32)
 
-# TODO: this should depend on whether device is metal.
+
+def get_backend_name():
+    return jax.extend.backend.get_backend().platform
+
 # At time of writing, jax-metal did not support jax.lax.top_k.
-use_jax_top_k = False
+use_jax_top_k = jax.extend.backend.get_backend().platform != 'METAL'
 
 def _top_k(x, k):
     if use_jax_top_k:

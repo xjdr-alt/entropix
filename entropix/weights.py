@@ -30,6 +30,7 @@ def load_weights(ckpt_dir: Path, n_layers: int = 16):
   layer_weights = []
   try:
     device = jax.devices("METAL")[0]
+    print("Using Metal backend")
   except RuntimeError:
     print("Metal not found, trying GPU.")
     try:
