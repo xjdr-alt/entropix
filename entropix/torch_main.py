@@ -1,19 +1,15 @@
-from typing import NamedTuple, Optional, Tuple
-
 import torch
-import torch.nn.functional as F
 
-import math
+
 import tyro
 
 from pathlib import Path
-from functools import partial
 
 from entropix.config import LLAMA_1B_PARAMS
 from entropix.tokenizer import Tokenizer
 from entropix.torch_kvcache import KVCache
 from entropix.torch_model import xfmr
-from entropix.torch_weights import XfmrWeights, LayerWeights, load_weights
+from entropix.torch_weights import load_weights
 from entropix.torch_sampler import sample
 from entropix.prompts import create_prompts_from_csv, prompt, bp1
 
@@ -117,14 +113,14 @@ def main():
         if torch.isin(next_token, stop).any():
           break
 
-    csv_path = Path('entropix/prompts.csv')
+    csv_path = Path('entropix/data/prompts.csv')
     prompts = create_prompts_from_csv(csv_path)
     PROMPT_TEST = False
 
     if PROMPT_TEST:
-      for prompt in prompts:
-        print(prompt)
-        tokens = tokenizer.encode(prompt, bos=False, eos=False, allowed_special='all')
+      for test_prompt in prompts:
+        print(test_prompt)
+        tokens = tokenizer.encode(test_prompt, bos=False, eos=False, allowed_special='all')
         generate(xfmr_weights, model_params, tokens)
     else:
         raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')

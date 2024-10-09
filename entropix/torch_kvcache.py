@@ -12,8 +12,8 @@ else:
 #print(f"Using device: {device}")
 
 class KVCache(nn.Module):
-    def init(self, layers: int, bsz: int, max_seq_len: int, kv_heads: int, head_dim: int):
-        super(KVCache, self).init()
+    def __init__(self, layers: int, bsz: int, max_seq_len: int, kv_heads: int, head_dim: int):
+        super(KVCache, self).__init__()
         # Initialize k and v as buffers to ensure they're part of the module state
         self.register_buffer(
             'k',
@@ -63,7 +63,6 @@ class KVCache(nn.Module):
 
         # Update the k and v tensors in the specified layer and position
         bsz, insert_len, _, _ = xk.shape  # Assuming xk shape is (bsz, insert_len, kv_heads, head_dim)
-        expected_dtype = xk.dtype
         self.k[layer_idx, :bsz, cur_pos:cur_pos+insert_len, :, :] = xk
         self.v[layer_idx, :bsz, cur_pos:cur_pos+insert_len, :, :] = xv
 
@@ -75,8 +74,8 @@ class KVCache(nn.Module):
             # Otherwise, repeat the existing keys and values from the cache
             keys = self.k[layer_idx].repeat_interleave(n_rep, dim=2)
             values = self.v[layer_idx].repeat_interleave(n_rep, dim=2)
-        keys = keys[: bsz].to(expected_dtype)
-        values = values[: bsz].to(expected_dtype)
+        keys = keys[: bsz].to(xk.dtype)
+        values = values[: bsz].to(xv.dtype)
         return keys, values, self
 
     def clear(self):
