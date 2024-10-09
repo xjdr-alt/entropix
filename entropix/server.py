@@ -1,6 +1,4 @@
 import logging
-import threading
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 from typing_extensions import Self
@@ -11,18 +9,18 @@ import time
 import jax
 import jax.numpy as jnp
 import tyro
-from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from jax._src.typing import Array
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 import uvicorn
 import asyncio
 import uvloop
 
 from entropix.config import LLAMA_1B_PARAMS
 from entropix.kvcache import KVCache
-from entropix.main import apply_scaling, build_attn_mask, precompute_freqs_cis
+from entropix.main import build_attn_mask, precompute_freqs_cis
 from entropix.model import xfmr
 from entropix.sampler import SamplerConfig, sample
 from entropix.tokenizer import Tokenizer
@@ -112,7 +110,6 @@ class ChatRequest(BaseModel):
     return v
 
 
-
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 logging.basicConfig(level=logging.INFO)
 
@@ -133,7 +130,6 @@ app.add_middleware(
 
 @app.get("/health")
 async def health() -> Response:
-  """Check the health of the http server."""
   return Response(status_code=200)
 
 def apply_chat_template(messages: list[Message]) -> str:
@@ -175,7 +171,7 @@ def generate_stream(tokens: Array, attn_mask: Array, freqs_cis: Array, kvcache: 
   uid = str(uuid.uuid4())
   gen_tokens = None
   cur_pos = 0
-  bsz, seqlen = tokens.shape
+  _, seqlen = tokens.shape
 
   logits, kvcache, _, _ = xfmr(xfmr_weights, model_params, tokens, cur_pos, freqs_cis[:seqlen], kvcache, attn_mask=attn_mask)  # type: ignore
   next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
@@ -186,7 +182,6 @@ def generate_stream(tokens: Array, attn_mask: Array, freqs_cis: Array, kvcache: 
   stop = jnp.array([128001, 128008, 128009])
   sampler_cfg = SamplerConfig()
 
-  # print(tokenizer.decode([next_token.item()]), end='', flush=True)
   # https://platform.openai.com/docs/api-reference/chat/streaming
   data = dict(
     id=uid,
@@ -203,14 +198,9 @@ def generate_stream(tokens: Array, attn_mask: Array, freqs_cis: Array, kvcache: 
     ],
   )
 
-  logging.info("first token")
-  logging.info(tokenizer.decode([next_token.item()]))
-  logging.info("end first token")
-  # yield f"data: {json.dumps(data)}\n\n"
-
   while cur_pos < 8192:
     cur_pos += 1
-    logits, kvcache, scores, stats = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos + 1], kvcache)  # type: ignore
+    logits, kvcache, scores, _ = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos + 1], kvcache)  # type: ignore
     next_token = sample(gen_tokens, logits, scores, cfg=sampler_cfg)
     gen_tokens = jnp.concatenate((gen_tokens, next_token))
 
@@ -229,8 +219,6 @@ def generate_stream(tokens: Array, attn_mask: Array, freqs_cis: Array, kvcache: 
       ],
     )
 
-    logging.info(tokenizer.decode([next_token.item()]))
-
     if jnp.isin(next_token, stop).any():
       data["choices"][0]["finish_reason"] = "stop"  # type: ignore
       data["choices"][0]["delta"] = dict(role="assistant", content=None)  # type: ignore
@@ -245,7 +233,7 @@ async def generate_completion(tokens: Array, attn_mask: Array, freqs_cis: Array,
   uid = str(uuid.uuid4())
   gen_tokens = None
   cur_pos = 0
-  bsz, seqlen = tokens.shape
+  _, seqlen = tokens.shape
 
   logits, kvcache, _, _ = xfmr(xfmr_weights, model_params, tokens, cur_pos, freqs_cis[:seqlen], kvcache, attn_mask=attn_mask)  # type: ignore
   next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
@@ -266,16 +254,17 @@ async def generate_completion(tokens: Array, attn_mask: Array, freqs_cis: Array,
 
   while cur_pos < 8192:
     cur_pos += 1
-    logits, kvcache, scores, stats = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos + 1], kvcache)  # type: ignore
+    logits, kvcache, scores, _ = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos + 1], kvcache)  # type: ignore
     next_token = sample(gen_tokens, logits, scores, cfg=sampler_cfg)
     gen_tokens = jnp.concatenate((gen_tokens, next_token))
 
-    token_decoded = tokenizer.decode(next_token.tolist()[0])
-    choices[0]["message"]["content"] += token_decoded
+    token_decoded = tokenizer.decode([next_token.item()])
 
     if jnp.isin(next_token, stop).any():
       choices[0]["finish_reason"] = "stop"
       break
+    else:
+      choices[0]["message"]["content"] += token_decoded
 
   completion = dict(
     id=uid,
