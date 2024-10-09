@@ -203,8 +203,10 @@ def generate_stream(tokens: Array, attn_mask: Array, freqs_cis: Array, kvcache: 
     ],
   )
 
+  logging.info("first token")
   logging.info(tokenizer.decode([next_token.item()]))
-  yield json.dumps(data)
+  logging.info("end first token")
+  # yield f"data: {json.dumps(data)}\n\n"
 
   while cur_pos < 8192:
     cur_pos += 1
@@ -219,8 +221,8 @@ def generate_stream(tokens: Array, attn_mask: Array, freqs_cis: Array, kvcache: 
       model=request.model or "llama-3.2-1b",  # WARN: hardcoded default model
       choices=[ # TODO: multiple choices for branching
         dict(
-          text=tokenizer.decode([next_token.item()]),
           index=0,
+          delta=dict(role="assistant", content=tokenizer.decode([next_token.item()])),
           logprobs=None, # TODO
           finish_reason=None,
         )
@@ -230,11 +232,12 @@ def generate_stream(tokens: Array, attn_mask: Array, freqs_cis: Array, kvcache: 
     logging.info(tokenizer.decode([next_token.item()]))
 
     if jnp.isin(next_token, stop).any():
-      data.choices[0].finish_reason = "stop"  # type: ignore
-      yield json.dumps(data)
+      data["choices"][0]["finish_reason"] = "stop"  # type: ignore
+      data["choices"][0]["delta"] = dict(role="assistant", content=None)  # type: ignore
+      yield f"data: {json.dumps(data)}\n\n"
       break
     else:
-      yield json.dumps(data)
+      yield f"data: {json.dumps(data)}\n\n"
 
 async def generate_completion(tokens: Array, attn_mask: Array, freqs_cis: Array, kvcache: KVCache, request: ChatRequest):
   assert tokenizer is not None
