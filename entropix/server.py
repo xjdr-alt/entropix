@@ -113,8 +113,8 @@ class ChatRequest(BaseModel):
 
 
 
-logger = logging.getLogger(__name__)
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+logging.basicConfig(level=logging.INFO)
 
 xfmr_weights = None
 tokenizer = None
@@ -149,9 +149,11 @@ def apply_chat_template(messages: list[Message]) -> str:
 
 @app.post("/v1/chat/completions")
 async def openai_chat_completions(request: ChatRequest):
-  logger.info(request)
+  logging.info(f"\n{request}")
   if xfmr_weights is None or tokenizer is None:
     return JSONResponse(status_code=500, content={"error": "Model not loaded"})
+  logging.info(type(tokenizer))
+  logging.info(type(xfmr_weights))
   prompt = apply_chat_template(request.messages)
   tokens = tokenizer.encode(prompt, bos=False, eos=False, allowed_special='all')
   tokens = jnp.array([tokens], jnp.int32)
@@ -193,7 +195,7 @@ def generate_stream(tokens: Array, attn_mask: Array, freqs_cis: Array, kvcache: 
     model=request.model or "llama-3.2-1b",  # WARN: hardcoded default model
     choices=[
       dict(
-        text=tokenizer.decode(next_token.item()),
+        text=tokenizer.decode([next_token.item()]),
         index=0,
         logprobs=None, # TODO
         finish_reason=None,
@@ -201,7 +203,7 @@ def generate_stream(tokens: Array, attn_mask: Array, freqs_cis: Array, kvcache: 
     ],
   )
 
-  logger.info(tokenizer.decode(next_token.item()))
+  logging.info(tokenizer.decode([next_token.item()]))
   yield json.dumps(data)
 
   while cur_pos < 8192:
@@ -217,7 +219,7 @@ def generate_stream(tokens: Array, attn_mask: Array, freqs_cis: Array, kvcache: 
       model=request.model or "llama-3.2-1b",  # WARN: hardcoded default model
       choices=[ # TODO: multiple choices for branching
         dict(
-          text=tokenizer.decode(next_token.item()),
+          text=tokenizer.decode([next_token.item()]),
           index=0,
           logprobs=None, # TODO
           finish_reason=None,
@@ -225,7 +227,7 @@ def generate_stream(tokens: Array, attn_mask: Array, freqs_cis: Array, kvcache: 
       ],
     )
 
-    logger.info(tokenizer.decode(next_token.item()))
+    logging.info(tokenizer.decode([next_token.item()]))
 
     if jnp.isin(next_token, stop).any():
       data.choices[0].finish_reason = "stop"  # type: ignore
@@ -236,7 +238,6 @@ def generate_stream(tokens: Array, attn_mask: Array, freqs_cis: Array, kvcache: 
 
 async def generate_completion(tokens: Array, attn_mask: Array, freqs_cis: Array, kvcache: KVCache, request: ChatRequest):
   assert tokenizer is not None
-
 
   uid = str(uuid.uuid4())
   gen_tokens = None
@@ -255,7 +256,7 @@ async def generate_completion(tokens: Array, attn_mask: Array, freqs_cis: Array,
   choices = [ # TODO: multiple choices for branching
     {
       "index": 0,
-      "message": {"role": "assistant", "content": tokenizer.decode(next_token.item())},
+      "message": {"role": "assistant", "content": tokenizer.decode([next_token.item()])},
       "finish_reason": None,
     }
   ]
