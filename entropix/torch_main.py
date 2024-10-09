@@ -1,8 +1,5 @@
 import torch
-
-
 import tyro
-
 from pathlib import Path
 
 from entropix.config import LLAMA_1B_PARAMS
