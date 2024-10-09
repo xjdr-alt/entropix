@@ -4,6 +4,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 from typing_extensions import Self
+import json
+import uuid
+import time
 
 import jax
 import jax.numpy as jnp
@@ -28,14 +31,14 @@ from entropix.weights import load_weights
 
 class ServerArgs(BaseModel):
   model_path: Path = Path("weights/1B-Instruct")
-  tokenizer_path: Path | None = None
+  tokenizer: Path = Path("entropix/tokenizer.model")
   host: str = "127.0.0.1"
   port: int = 1337
-  log_level: str = "INFO"
+  log_level: str = "info"
 
   def model_post_init(self, __context) -> None:
     assert self.model_path.exists(), f"Model path ({self.model_path}) does not exist."
-    if self.tokenizer_path is None: self.tokenizer_path = self.model_path
+    if self.tokenizer is None: self.tokenizer = self.model_path
 
 class Message(BaseModel):
   class ToolCallFunction(BaseModel):
@@ -109,13 +112,13 @@ class ChatRequest(BaseModel):
     return v
 
 
-weights_path = Path('weights/1B-Instruct')
-model_params = LLAMA_1B_PARAMS
-xfmr_weights = load_weights(weights_path.absolute())
-tokenizer = Tokenizer('entropix/tokenizer.model')
 
 logger = logging.getLogger(__name__)
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+
+xfmr_weights = None
+tokenizer = None
+model_params = LLAMA_1B_PARAMS # NOTE: hardcoded
 
 app = FastAPI()
 tokenizer_manager = None
@@ -133,33 +136,73 @@ async def health() -> Response:
   """Check the health of the http server."""
   return Response(status_code=200)
 
+def apply_chat_template(messages: list[Message]) -> str:
+  # TODO: should pull this from model path instead of hardcode to support other models
+  # https://huggingface.co/meta-llama/Llama-3.2-1B/blob/main/tokenizer_config.json
+  # https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/text_prompt_format.md
+  prompt = "<|begin_of_text|>"
+  for message in messages:
+    prompt += f"<|start_header_id|>{message.role}<|end_header_id|>\n"
+    prompt += f"{message.content}<|eot_id|>"
+  prompt += "<|start_header_id|>assistant<|end_header_id|>"
+  return prompt
+
 @app.post("/v1/chat/completions")
 async def openai_chat_completions(request: ChatRequest):
   logger.info(request)
-
-  tokens = tokenizer.encode(request.prompt, bos=False, eos=False, allowed_special='all')
-
+  if xfmr_weights is None or tokenizer is None:
+    return JSONResponse(status_code=500, content={"error": "Model not loaded"})
+  prompt = apply_chat_template(request.messages)
+  tokens = tokenizer.encode(prompt, bos=False, eos=False, allowed_special='all')
   tokens = jnp.array([tokens], jnp.int32)
   bsz, seqlen = tokens.shape
   attn_mask = build_attn_mask(seqlen, 0)
   freqs_cis = precompute_freqs_cis(model_params.head_dim, model_params.max_seq_len, model_params.rope_theta, model_params.use_scaled_rope)
   kvcache = KVCache.new(model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim)
-  return StreamingResponse(generate_stream(tokens, attn_mask, freqs_cis, kvcache), media_type="text/event-stream")
 
-def generate_stream(tokens: Array, attn_mask: Array, freqs_cis: Array, kvcache: KVCache):
+  if request.stream:
+    return StreamingResponse(generate_stream(tokens, attn_mask, freqs_cis, kvcache, request), media_type="text/event-stream")
+  else:
+    completion = await generate_completion(tokens, attn_mask, freqs_cis, kvcache, request)
+    return JSONResponse(content=completion)
+
+
+def generate_stream(tokens: Array, attn_mask: Array, freqs_cis: Array, kvcache: KVCache, request: ChatRequest):
+  assert tokenizer is not None
+
+  uid = str(uuid.uuid4())
   gen_tokens = None
   cur_pos = 0
   bsz, seqlen = tokens.shape
+
   logits, kvcache, _, _ = xfmr(xfmr_weights, model_params, tokens, cur_pos, freqs_cis[:seqlen], kvcache, attn_mask=attn_mask)  # type: ignore
   next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
   gen_tokens = next_token
 
-  # print(tokenizer.decode([next_token.item()]), end='', flush=True)
-  yield f"{tokenizer.decode(next_token.tolist()[0])}"
-
+  created_at = int(time.time())
   cur_pos = seqlen
   stop = jnp.array([128001, 128008, 128009])
   sampler_cfg = SamplerConfig()
+
+  # print(tokenizer.decode([next_token.item()]), end='', flush=True)
+  # https://platform.openai.com/docs/api-reference/chat/streaming
+  data = dict(
+    id=uid,
+    object="chat.completion.chunk",
+    created=created_at,
+    model=request.model or "llama-3.2-1b",  # WARN: hardcoded default model
+    choices=[
+      dict(
+        text=tokenizer.decode(next_token.item()),
+        index=0,
+        logprobs=None, # TODO
+        finish_reason=None,
+      )
+    ],
+  )
+
+  logger.info(tokenizer.decode(next_token.item()))
+  yield json.dumps(data)
 
   while cur_pos < 8192:
     cur_pos += 1
@@ -167,13 +210,92 @@ def generate_stream(tokens: Array, attn_mask: Array, freqs_cis: Array, kvcache: 
     next_token = sample(gen_tokens, logits, scores, cfg=sampler_cfg)
     gen_tokens = jnp.concatenate((gen_tokens, next_token))
 
-    # print(tokenizer.decode(next_token.tolist()[0]), end='', flush=True)
-    yield f"{tokenizer.decode(next_token.tolist()[0])}"
+    data = dict(
+      id=uid,
+      object="chat.completion.chunk",
+      created=created_at,
+      model=request.model or "llama-3.2-1b",  # WARN: hardcoded default model
+      choices=[ # TODO: multiple choices for branching
+        dict(
+          text=tokenizer.decode(next_token.item()),
+          index=0,
+          logprobs=None, # TODO
+          finish_reason=None,
+        )
+      ],
+    )
+
+    logger.info(tokenizer.decode(next_token.item()))
 
     if jnp.isin(next_token, stop).any():
+      data.choices[0].finish_reason = "stop"  # type: ignore
+      yield json.dumps(data)
+      break
+    else:
+      yield json.dumps(data)
+
+async def generate_completion(tokens: Array, attn_mask: Array, freqs_cis: Array, kvcache: KVCache, request: ChatRequest):
+  assert tokenizer is not None
+
+
+  uid = str(uuid.uuid4())
+  gen_tokens = None
+  cur_pos = 0
+  bsz, seqlen = tokens.shape
+
+  logits, kvcache, _, _ = xfmr(xfmr_weights, model_params, tokens, cur_pos, freqs_cis[:seqlen], kvcache, attn_mask=attn_mask)  # type: ignore
+  next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
+  gen_tokens = next_token
+
+  created_at = int(time.time())
+  cur_pos = seqlen
+  stop = jnp.array([128001, 128008, 128009])
+  sampler_cfg = SamplerConfig()
+
+  choices = [ # TODO: multiple choices for branching
+    {
+      "index": 0,
+      "message": {"role": "assistant", "content": tokenizer.decode(next_token.item())},
+      "finish_reason": None,
+    }
+  ]
+
+  while cur_pos < 8192:
+    cur_pos += 1
+    logits, kvcache, scores, stats = xfmr(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos + 1], kvcache)  # type: ignore
+    next_token = sample(gen_tokens, logits, scores, cfg=sampler_cfg)
+    gen_tokens = jnp.concatenate((gen_tokens, next_token))
+
+    token_decoded = tokenizer.decode(next_token.tolist()[0])
+    choices[0]["message"]["content"] += token_decoded
+
+    if jnp.isin(next_token, stop).any():
+      choices[0]["finish_reason"] = "stop"
       break
 
+  completion = dict(
+    id=uid,
+    object="chat.completion",
+    created=created_at,
+    model=request.model or "llama-3.2-1b",  # WARN: hardcoded default model
+    choices=choices,
+    usage=dict(
+      prompt_tokens=seqlen,
+      completion_tokens=len(gen_tokens[0]),
+      total_tokens=seqlen + len(gen_tokens[0]),
+    ),
+  )
+  return completion
+
+
 def launch_server(server_args: ServerArgs):
+  global xfmr_weights, tokenizer, model_params
+
+  xfmr_weights = load_weights(server_args.model_path.absolute())
+  xfmr_weights = jax.device_put(xfmr_weights)
+  tokenizer = Tokenizer(str(server_args.tokenizer.resolve()))
+  model_params = LLAMA_1B_PARAMS
+
   uvicorn.run(
     app,
     host=server_args.host,
