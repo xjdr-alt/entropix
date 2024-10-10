@@ -17,11 +17,9 @@ ml-dtypes = "^0.5.0"
 rich = "^13.8.1"
 torch = [ 
   {version = "^2.4.1", source = "pypi", markers = "platform_system == 'Darwin'"}, 
-  {version = "^2.4.1", source = "pytorch", extras = ["+cu124"], markers = "platform_system != 'Darwin'"} 
-] 
+  {version = "^2.4.1+cu124", source = "pytorch", markers = "platform_system != 'Darwin'"} ]
 chex = "^0.1.87"
 tyro = "^0.8.11"
-jax-metal = "^0.1.1"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -34,13 +32,6 @@ huggingface-hub = {extras = ["cli"], version = "^0.25.1"}
 [tool.poetry.group.test.dependencies]
 torch = "^2.4.1"
 fairscale = "^0.4.13"
-
-
-
-[tool.poetry.group.eval.dependencies]
-lm-eval = "^0.4.4"
-langdetect = "^1.0.9"
-immutabledict = "^4.2.0"
 
 [[tool.poetry.source]]  
 name = "pypi"  
