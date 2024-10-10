@@ -1,6 +1,6 @@
 from typing import List, NamedTuple
 
-
+import os
 import torch
 import jax
 import jax.numpy as jnp
@@ -53,7 +53,7 @@ def load_weights(ckpt_dir: Path = Path('weights/1B-Instruct'), n_layers: int = 1
   layer_weights = []
   with torch.inference_mode():
     for file in ckpt_dir.glob("*.npy"):
-      name = '.'.join(str(file).split('/')[-1].split('.')[:-1])
+      name = '.'.join(str(file).split(os.sep)[-1].split('.')[:-1])
       jax_weight = jnp.load(file=file, mmap_mode='r', allow_pickle=True)
       #print(f'JAX output (first 30): {jax_weight.flatten()[:30]}')
       np_weight = np.array(jax_weight).astype(np.float32)
