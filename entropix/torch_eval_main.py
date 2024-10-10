@@ -5,6 +5,7 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 import tyro
+import json
 from tqdm import tqdm
 
 from lm_eval import simple_evaluate
@@ -18,8 +19,8 @@ from entropix.torch_sampler import SamplerConfig, sample
 from entropix.tokenizer import Tokenizer
 from entropix.torch_weights import load_weights
 
-DEFAULT_WEIGHTS_PATH = Path(__file__).parent / '../weights'
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+DEFAULT_WEIGHTS_PATH = Path(__file__).parent / "../weights"
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # Device selection, tree is like first apple silicion, then cuda, fallback is cpu.
@@ -32,7 +33,8 @@ else:
 
 print(f"Using device: {device}")
 
-torch.set_float32_matmul_precision('high')
+torch.set_float32_matmul_precision("high")
+
 
 def apply_scaling(freqs: torch.Tensor) -> torch.Tensor:
     SCALE_FACTOR = 8.0
@@ -54,20 +56,13 @@ def apply_scaling(freqs: torch.Tensor) -> torch.Tensor:
         scaled = (1 - smooth) * freq / SCALE_FACTOR + smooth * freq
 
         # Apply conditional scaling
-        scaled = torch.where(
-            wavelen < high_freq_wavelen,
-            freq,  # No scaling
-            torch.where(
-                wavelen > low_freq_wavelen,
-                freq / SCALE_FACTOR,  # Apply scaling factor
-                scaled  # Apply smooth scaling
-            )
-        )
+        scaled = torch.where(wavelen < high_freq_wavelen, freq, torch.where(wavelen > low_freq_wavelen, freq / SCALE_FACTOR, scaled))  # No scaling  # Apply scaling factor  # Apply smooth scaling
         return scaled
 
     scaled_freqs = torch.vmap(scale_freq)(freqs)
-    
+
     return scaled_freqs
+
 
 def precompute_freqs_cis(dim: int, end: int, theta: float = 500000.0, use_scaled: bool = False, dtype: torch.dtype = torch.float32) -> torch.Tensor:
     freqs = 1.0 / (theta ** (torch.arange(0, dim, 2, dtype=dtype, device=device)[: (dim // 2)] / dim))
@@ -81,25 +76,21 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 500000.0, use_scaled
 
 
 def build_attn_mask(seqlen: int, start_pos: int) -> torch.Tensor:
-  mask = None
-  if seqlen > 1:
-      mask = torch.full((seqlen, seqlen), float("-inf"))
-      mask = torch.triu(mask, diagonal=1)
-      mask = torch.hstack([torch.zeros((seqlen, start_pos)), mask]).to(torch.float32).to(device)
-  return mask
+    mask = None
+    if seqlen > 1:
+        mask = torch.full((seqlen, seqlen), float("-inf"))
+        mask = torch.triu(mask, diagonal=1)
+        mask = torch.hstack([torch.zeros((seqlen, start_pos)), mask]).to(torch.float32).to(device)
+    return mask
+
 
 class CustomLLaMAModel(LM):
     def __init__(self, weights_path: Path):
         super().__init__()
         self.model_params = LLAMA_1B_PARAMS
         self.xfmr_weights = load_weights(weights_path.absolute())
-        self.tokenizer = Tokenizer('entropix/tokenizer.model')
-        self.freqs_cis = precompute_freqs_cis(
-            self.model_params.head_dim,
-            self.model_params.max_seq_len,
-            self.model_params.rope_theta,
-            self.model_params.use_scaled_rope
-        )
+        self.tokenizer = Tokenizer("entropix/tokenizer.model")
+        self.freqs_cis = precompute_freqs_cis(self.model_params.head_dim, self.model_params.max_seq_len, self.model_params.rope_theta, self.model_params.use_scaled_rope)
         self.sampler_cfg = SamplerConfig()
 
     def _model_generate(self, context_tokens: List[int], max_tokens: int):
@@ -116,23 +107,24 @@ class CustomLLaMAModel(LM):
 
         cur_pos = seqlen
         stop = torch.tensor([128001, 128008, 128009], device=device, dtype=torch.int32)
-
+        all_logits = []
         while cur_pos < min(self.model_params.max_seq_len, len(context_tokens) + max_tokens):
             cur_pos += 1
-            logits, kvcache, scores, _ = xfmr(self.xfmr_weights, self.model_params, next_token, cur_pos, self.freqs_cis[cur_pos:cur_pos+1], kvcache)
+            logits, kvcache, scores, _ = xfmr(self.xfmr_weights, self.model_params, next_token, cur_pos, self.freqs_cis[cur_pos : cur_pos + 1], kvcache)
             next_token, _ = sample(gen_tokens, logits, scores, cfg=self.sampler_cfg)
             gen_tokens = torch.cat((gen_tokens, next_token), dim=1)
+            all_logits.append(logits)
             if torch.isin(next_token, stop).any():
                 break
 
-        return gen_tokens, logits
+        return gen_tokens, torch.cat(all_logits, dim=1)
 
     def generate_until(self, requests) -> List[str]:
         res = []
         for request in tqdm(requests):
             context = request.args[0]
             until = request.args[1]
-            context_tokens = self.tokenizer.encode(context, bos=False, eos=False, allowed_special='all')
+            context_tokens = self.tokenizer.encode(context, bos=False, eos=False, allowed_special="all")
             generated_tokens, _ = self._model_generate(context_tokens, self.max_gen_toks)
             for t in generated_tokens:
                 decoded = self.tokenizer.decode(t.tolist())
@@ -147,38 +139,37 @@ class CustomLLaMAModel(LM):
         return res
 
     def loglikelihood(self, requests):
-      res = []
-      for request in requests:
-        context = request.args[0]
-        continuation = request.args[1]
-        context_tokens = self.tokenizer.encode(context, bos=False, eos=False, allowed_special='all')
-        continuation_tokens = self.tokenizer.encode(continuation, bos=False, eos=False, allowed_special='all')
-        all_tokens = context_tokens + continuation_tokens
-        tokens, logits = self._model_generate(context_tokens, len(continuation_tokens))
-        continuation_logprobs = torch.nn.functional.log_softmax(logits, dim=-1)
-        greedy_tokens = torch.argmax(continuation_logprobs, axis=-1)
-        max_equal = torch.all(greedy_tokens == torch.tensor(continuation_tokens))
-        selected_logprobs = continuation_logprobs[torch.arange(len(continuation_tokens)), torch.tensor(continuation_tokens)]
-        logprob_sum = torch.sum(selected_logprobs)
+        res = []
+        for request in tqdm(requests):
+            context = request.args[0]
+            continuation = request.args[1]
+            context_tokens = self.tokenizer.encode(context, bos=False, eos=False, allowed_special="all")
+            continuation_tokens = self.tokenizer.encode(continuation, bos=False, eos=False, allowed_special="all")
+            all_tokens = context_tokens + continuation_tokens
+            tokens, logits = self._model_generate(context_tokens, len(continuation_tokens))
+            continuation_logprobs = torch.nn.functional.log_softmax(logits, dim=-1)  # (bsz, seqlen, vocab_size)
+            greedy_tokens = torch.argmax(continuation_logprobs, axis=-1)
+            max_equal = torch.all(greedy_tokens == torch.tensor(continuation_tokens, device=device, dtype=torch.long))
+            selected_logprobs = continuation_logprobs[0, torch.arange(len(continuation_tokens)), torch.tensor(continuation_tokens, device=device, dtype=torch.long)]
+            logprob_sum = torch.sum(selected_logprobs)
 
-        res.append((float(logprob_sum), bool(max_equal)))
-      return res
-
+            res.append((float(logprob_sum), bool(max_equal)))
+        return res
 
     def loglikelihood_rolling(self, requests):
         res = []
-        for request in requests:
+        for request in tqdm(requests):
             context = request.args[0]
             continuation = request.args[1]
 
-            context_tokens = self.tokenizer.encode(context, bos=False, eos=False, allowed_special='all')
-            continuation_tokens = self.tokenizer.encode(continuation, bos=False, eos=False, allowed_special='all')
+            context_tokens = self.tokenizer.encode(context, bos=False, eos=False, allowed_special="all")
+            continuation_tokens = self.tokenizer.encode(continuation, bos=False, eos=False, allowed_special="all")
             all_tokens = context_tokens + continuation_tokens
 
             tokens, logits = self._model_generate(context_tokens, len(continuation_tokens))
 
             token_logprobs = torch.nn.functional.log_softmax(logits, dim=-1)
-            selected_logprobs = token_logprobs[torch.arange(len(continuation_tokens)), torch.tensor(continuation_tokens)]
+            selected_logprobs = token_logprobs[0, torch.arange(len(continuation_tokens)), torch.tensor(continuation_tokens, device=device, dtype=torch.long)]
 
             res.append(selected_logprobs.tolist())
 
@@ -202,10 +193,11 @@ class CustomLLaMAModel(LM):
 
     @property
     def device(self) -> str:
-        return 'cuda'  # Adjust if using GPU/TPU
+        return "cuda"  # Adjust if using GPU/TPU
+
 
 def main(
-    weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('1B-Instruct'),
+    weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath("1B-Instruct"),
     tasks: List[str] = ["gpqa"],
     num_fewshot: int = 5,
 ):
@@ -217,13 +209,11 @@ def main(
     )
 
     # Create a TaskOutput object
-    output = TaskOutput(results)
+    with open("results.json", "w") as f:
+        json.dump(results, f)
 
-    # Print the results in a formatted way
-    print(output.formatted())
+    print(results["results"])
 
-    # If you want to save the results to a file/
-    output.save_json("leaderboard.json")
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     tyro.cli(main)
