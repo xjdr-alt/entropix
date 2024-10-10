@@ -32,6 +32,12 @@ torch = "^2.4.1"
 fairscale = "^0.4.13"
 
 
+
+[tool.poetry.group.eval.dependencies]
+lm-eval = "^0.4.4"
+langdetect = "^1.0.9"
+immutabledict = "^4.2.0"
+
 [[tool.poetry.source]]
 name = "pytorch"
 url = "https://download.pytorch.org/whl/cu124"
