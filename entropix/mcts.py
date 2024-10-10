@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 from typing import Tuple
 
 from entropix.torch_main import calculate_varentropy_logsoftmax, _sample
