@@ -147,3 +147,5 @@ dmypy.json
 
 #tiktoken model file
 entropix/tokenizer.model
+
+.cursorignore
