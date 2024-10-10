@@ -51,6 +51,8 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 500000.0, use_scaled
     if backend == 'METAL':  # Apple silicon(e) :P
         # Metal implementation (avoid complex numbers)
         freqs = 1.0 / (theta ** (jnp.arange(0, dim, 2)[: (dim // 2)].astype(jnp.float32) / dim))
+        if use_scaled:
+          freqs = apply_scaling(freqs)  
         t = jnp.arange(end)
         freqs = jnp.outer(t, freqs)
         return jnp.stack([jnp.cos(freqs), jnp.sin(freqs)], axis=-1)
@@ -58,6 +60,8 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 500000.0, use_scaled
     elif backend in ['gpu', 'tpu', 'cpu']:
         # GPU/TPU implementation (supports complex numbers)
         freqs = 1.0 / (theta ** (jnp.arange(0, dim, 2)[: (dim // 2)].astype(jnp.float32) / dim))
+        if use_scaled:
+          freqs = apply_scaling(freqs)  
         t = jnp.arange(end)
         freqs = jnp.outer(t, freqs)
         return jnp.exp(1j * freqs)
