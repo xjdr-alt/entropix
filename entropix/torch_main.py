@@ -17,8 +17,6 @@ from entropix.torch_weights import XfmrWeights, LayerWeights, load_weights
 from entropix.torch_sampler import sample
 from entropix.prompts import prompt, bp1
 
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
 
 # Device selection, tree is like first apple silicion, then cuda, fallback is cpu.
 if torch.backends.mps.is_available():
@@ -107,7 +105,7 @@ def main():
       bsz, seqlen = tokens.shape
       attn_mask = build_attn_mask(seqlen, cur_pos)
       freqs_cis = precompute_freqs_cis(model_params.head_dim, model_params.max_seq_len, model_params.rope_theta, model_params.use_scaled_rope)
-      kvcache = KVCache.new(model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim).to(DEVICE)
+      kvcache = KVCache.new(model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim).to(device)
       logits, kvcache, _, _ = xfmr(xfmr_weights, model_params, tokens, cur_pos, freqs_cis[:seqlen], kvcache, attn_mask=attn_mask)
       next_token = torch.argmax(logits[:, -1], dim=-1, keepdim=True).to(torch.int32)
       gen_tokens = next_token
