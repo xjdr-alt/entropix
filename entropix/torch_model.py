@@ -44,6 +44,8 @@ def attention(x: torch.Tensor, layer_weights: LayerWeights, model_params, cur_po
     xv = F.linear(x, layer_weights.wv).reshape(bsz, -1, model_params.n_local_kv_heads, model_params.head_dim)
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
     keys, values, kvcache = kvcache.update(xk, xv, layer_idx, cur_pos, n_rep)
+    keys = keys.float()
+    values = values.float()
     xq = torch.permute(xq, (0, 2, 1, 3))  # (bs, n_heads, seqlen, head_dim)
     keys = torch.permute(keys, (0, 2, 3, 1))  # (bs, n_heads, head_dim, cache_len + seqlen)
     values = torch.permute(values, (0, 2, 1, 3))  # (bs, n_heads, cache_len + seqlen, head_dim)
@@ -54,9 +56,9 @@ def attention(x: torch.Tensor, layer_weights: LayerWeights, model_params, cur_po
         scores = scores + attn_mask
     mask = torch.where(scores != 0.0, scores, DEFAULT_MASK_VALUE)
     padded_logits = torch.where((mask >= DEFAULT_MASK_VALUE * 0.5), scores, DEFAULT_MASK_VALUE)
-    scores = F.softmax(padded_logits, dim=-1).to(x.dtype)
+    scores = F.softmax(padded_logits, dim=-1).to(torch.float32)
     output = torch.matmul(scores, values)
-    output = output.transpose(1, 2).reshape(xq.shape[0], xq.shape[2], -1)
+    output = output.transpose(1, 2).reshape(xq.shape[0], xq.shape[2], -1).to(x.dtype)
     out = F.linear(output, layer_weights.wo)
     return out, kvcache, pre_scores
 
