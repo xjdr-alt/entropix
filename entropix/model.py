@@ -18,17 +18,36 @@ DEFAULT_MASK_VALUE = -0.7 * float(jnp.finfo(jnp.dtype("float32")).max)
 def rms_norm(x: jax.Array, w: jax.Array, eps: float = 1e-6) -> jax.Array:
   return w * (x * jax.lax.rsqrt(jax.lax.pow(x, 2).mean(-1, keepdims=True) + eps))
 
+def get_backend_name():
+    return jax.extend.backend.get_backend().platform
 
 @partial(jax.jit, static_argnames=("dtype"))
 def apply_rotary_emb(xq: jax.Array, xk: jax.Array, freqs_cis: jax.Array, dtype: jnp.dtype = jnp.float32) -> Tuple[jax.Array, jax.Array]:
   reshape_xq = xq.astype(jnp.float32).reshape(*xq.shape[:-1], -1, 2)
   reshape_xk = xk.astype(jnp.float32).reshape(*xk.shape[:-1], -1, 2)
-  xq_ = jax.lax.complex(reshape_xq[..., 0], reshape_xq[..., 1])
-  xk_ = jax.lax.complex(reshape_xk[..., 0], reshape_xk[..., 1])
-  xq_out = xq_ * freqs_cis[None, :, None, :]
-  xk_out = xk_ * freqs_cis[None, :, None, :]
-  xq_out = jnp.stack((jnp.real(xq_out), jnp.imag(xq_out)), axis=-1).reshape(*xq_out.shape[:-1], -1)
-  xk_out = jnp.stack((jnp.real(xk_out), jnp.imag(xk_out)), axis=-1).reshape(*xk_out.shape[:-1], -1)
+  backend = get_backend_name()
+
+  if backend == 'METAL':  # Apple silicon(e) :P
+      # Metal implementation (avoid complex numbers)
+    freqs_c = freqs_cis[None, :, None, :, 0]
+    freqs_s = freqs_cis[None, :, None, :, 1]
+    xq_re = reshape_xq[..., 0] * freqs_c - reshape_xq[..., 1] * freqs_s
+    xq_im = reshape_xq[..., 0] * freqs_s + reshape_xq[..., 1] * freqs_c
+    xq_out = jnp.stack((xq_re, xq_im), axis=-1).reshape(*xq_re.shape[:-1], -1)
+    xk_re = reshape_xk[..., 0] * freqs_c - reshape_xk[..., 1] * freqs_s
+    xk_im = reshape_xk[..., 0] * freqs_s + reshape_xk[..., 1] * freqs_c
+    xk_out = jnp.stack((xk_re, xk_im), axis=-1).reshape(*xk_re.shape[:-1], -1)
+
+  elif backend in ['gpu', 'tpu', 'cpu']:
+    # GPU/TPU implementation (supports complex numbers)
+    xq_ = jax.lax.complex(reshape_xq[..., 0], reshape_xq[..., 1])
+    xk_ = jax.lax.complex(reshape_xk[..., 0], reshape_xk[..., 1])
+    xq_out = xq_ * freqs_cis[None, :, None, :]
+    xk_out = xk_ * freqs_cis[None, :, None, :]
+    xq_out = jnp.stack((jnp.real(xq_out), jnp.imag(xq_out)), axis=-1).reshape(*xq_out.shape[:-1], -1)
+    xk_out = jnp.stack((jnp.real(xk_out), jnp.imag(xk_out)), axis=-1).reshape(*xk_out.shape[:-1], -1)
+  else:
+    raise ValueError(f"Unsupported backend: {backend}")  
   return xq_out.astype(dtype), xk_out.astype(dtype)
 
 @partial(jax.jit, static_argnames=("model_params", "cur_pos", "layer_idx"))

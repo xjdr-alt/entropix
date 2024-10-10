@@ -3,6 +3,7 @@ from typing import Tuple
 import math
 from pathlib import Path
 
+import jax.extend.backend
 import jax
 import jax.numpy as jnp
 import tyro
@@ -43,14 +44,32 @@ def apply_scaling(freqs: jax.Array):
 
   return jax.vmap(scale_freq)(freqs)
 
+def get_backend_name():
+    return jax.extend.backend.get_backend().platform
 
-def precompute_freqs_cis(dim: int, end: int, theta: float = 500000.0, use_scaled: bool = False, dtype: jnp.dtype = jnp.float32) -> jax.Array:
-  freqs = 1.0 / (theta ** (jnp.arange(0, dim, 2)[: (dim // 2)].astype(dtype) / dim))
-  if use_scaled:
-    freqs = apply_scaling(freqs)
-  t = jnp.arange(end, dtype=dtype)
-  freqs = jnp.outer(t, freqs)
-  return jnp.exp(1j * freqs)
+def precompute_freqs_cis(dim: int, end: int, theta: float = 500000.0, use_scaled: bool = False, dtype: jnp.dtype = jnp.float32) -> jax.Array: 
+    backend = get_backend_name()
+    
+    if backend == 'METAL':  # Apple silicon(e) :P
+        # Metal implementation (avoid complex numbers)
+        freqs = 1.0 / (theta ** (jnp.arange(0, dim, 2)[: (dim // 2)].astype(jnp.float32) / dim))
+        if use_scaled:
+          freqs = apply_scaling(freqs)  
+        t = jnp.arange(end)
+        freqs = jnp.outer(t, freqs)
+        return jnp.stack([jnp.cos(freqs), jnp.sin(freqs)], axis=-1)
+    
+    elif backend in ['gpu', 'tpu', 'cpu']:
+        # GPU/TPU implementation (supports complex numbers)
+        freqs = 1.0 / (theta ** (jnp.arange(0, dim, 2)[: (dim // 2)].astype(jnp.float32) / dim))
+        if use_scaled:
+          freqs = apply_scaling(freqs)  
+        t = jnp.arange(end)
+        freqs = jnp.outer(t, freqs)
+        return jnp.exp(1j * freqs)
+    
+    else:
+        raise ValueError(f"Unsupported backend: {backend}")
 
 
 def build_attn_mask(seqlen: int, start_pos: int) -> jax.Array:
