@@ -6,6 +6,7 @@ from pathlib import Path
 import jax.extend.backend
 import jax
 import jax.numpy as jnp
+import jax.extend.backend
 import tyro
 
 from entropix.config import LLAMA_1B_PARAMS

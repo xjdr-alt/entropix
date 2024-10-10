@@ -140,6 +140,24 @@ def multinomial_sample_one(probs_sort: jax.Array, key) -> jax.Array:
     q = jax.random.exponential(key=key, shape=probs_sort.shape)
     return jnp.argmax(probs_sort / q, axis=-1, keepdims=True).astype(jnp.int32)
 
+
+def get_backend_name():
+    return jax.extend.backend.get_backend().platform
+
+# At time of writing, jax-metal did not support jax.lax.top_k.
+use_jax_top_k = jax.extend.backend.get_backend().platform != 'METAL'
+
+def _top_k(x, k):
+    if use_jax_top_k:
+        return jax.lax.top_k(x, k=k)
+    # jax.lax.top_k fails when using jax-metal, so reimplement it.
+    # You can't backprop through this version but it doesn't matter
+    # in the sampler.
+    sorted_indices = jnp.argsort(x, axis=-1)
+    indices = jnp.flip(sorted_indices[..., -k:], axis=-1)
+    values = jnp.take_along_axis(x, indices, axis=-1)
+    return values, indices
+
 def _sample( logits: jax.Array, *, temperature: float | jax.Array, top_p: float | jax.Array, top_k: int | jax.Array, min_p: float | jax.Array,
             key=jax.random.PRNGKey(1337),) -> jax.Array:
     bsz = logits.shape[0]
@@ -153,7 +171,7 @@ def _sample( logits: jax.Array, *, temperature: float | jax.Array, top_p: float 
       logit = jnp.where(indices_to_remove, jnp.full_like(logit, float('-inf')), logit)
 
     # Apply top-k sampling
-    top_k_probs, top_k_indices = jax.lax.top_k(probs, k=top_k)
+    top_k_probs, top_k_indices = _top_k(probs, k=top_k)
     probs_sort = jnp.flip(top_k_probs, axis=-1)
     probs_idx = jnp.flip(top_k_indices, axis=-1)
     probs_sum = jnp.cumsum(probs_sort, axis=-1)

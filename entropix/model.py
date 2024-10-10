@@ -47,7 +47,7 @@ def apply_rotary_emb(xq: jax.Array, xk: jax.Array, freqs_cis: jax.Array, dtype: 
     xq_out = jnp.stack((jnp.real(xq_out), jnp.imag(xq_out)), axis=-1).reshape(*xq_out.shape[:-1], -1)
     xk_out = jnp.stack((jnp.real(xk_out), jnp.imag(xk_out)), axis=-1).reshape(*xk_out.shape[:-1], -1)
   else:
-    raise ValueError(f"Unsupported backend: {backend}")  
+    raise ValueError(f"Unsupported backend: {backend}")
   return xq_out.astype(dtype), xk_out.astype(dtype)
 
 @partial(jax.jit, static_argnames=("model_params", "cur_pos", "layer_idx"))
