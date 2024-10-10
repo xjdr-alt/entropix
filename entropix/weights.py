@@ -29,10 +29,15 @@ def load_weights(ckpt_dir: Path, n_layers: int = 16):
   w = {}
   layer_weights = []
   try:
-    device = jax.devices("gpu")[0]
+    device = jax.devices("METAL")[0]
+    print("Using Metal backend")
   except RuntimeError:
-    print("GPU not found. Using CPU instead.")
-    device = jax.devices("cpu")[0]
+    print("Metal not found, trying GPU.")
+    try:
+      device = jax.devices("gpu")[0]
+    except RuntimeError:
+      print("GPU not found. Using CPU instead.")
+      device = jax.devices("cpu")[0]
   for file in ckpt_dir.glob("*.npy"):
     name = '.'.join(str(file).split('/')[-1].split('.')[:-1])
     weight = jnp.load(file=file, mmap_mode='r', allow_pickle=True)

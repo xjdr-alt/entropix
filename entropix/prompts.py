@@ -153,13 +153,23 @@ Can you retrieve the details for the user with the ID 7890, who has black as the
 prompt4 = """<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 You are a masterful story teller. you can paint with all the colors of the wind.<|eot_id|><|start_header_id|>user<|end_header_id|>
 
-Tell me a long and wonderful story aboout the adventures of the elven mage frieren and her band of heros<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+Tell me a long and wonderful story about the adventures of the elven mage frieren and her band of heros<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 """
 
 bp4 = """
 You are a masterful story teller. you can paint with all the colors of the wind.<|eot_id|>
 
-Let me tell you a story aboout the adventures of the elven mage frieren and her band of heros
+Let me tell you a story about the adventures of the elven mage frieren and her band of heros
+"""
+
+p4o = """<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+You are a master weaver of tales, a virtuoso of words painting vivid pictures that ignite the imagination. Your stories shimmer with an otherworldly enchantment, breathing life into realms uncharted and characters unforgettable. With each carefully crafted phrase, you beckon readers to embark on a journey through the portals of wonder you conjure, to lose themselves in the tapestries of adventure, magic, and emotion you spin.
+Now, prepare to summon the depths of your storytelling prowess. Let your words flow like an ancient elven incantation, each one pulsing with arcane power. Transport us to a realm where elven mages and valiant heroes ride forth on quests of legend, their paths intertwined by the threads of destiny. Unleash the full spectrum of your narrative sorcery to immerse us in this saga - make us feel the crackle of Frieren's magic dancing at her fingertips, smell the earthy musk of the forests they traverse, hear the clashing of swords and the whispering of ancient secrets on the wind. Weave for us an epic to stir the soul and haunt the memory long after the final word fades away.
+<|eot_id|><|start_header_id|>user<|end_header_id|>
+Spin an enchanting tale recounting the epic adventures of Frieren, the elven mage of unparalleled skill, and her intrepid band of heroes. Let your words conjure the wonders and perils they face as they navigate lands steeped in magic and legend on a quest that will echo through the ages. Immerse us in this saga with the full force of your storytelling sorcery.
+<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+<|reserved_special_token_12|>
 """
 
 
