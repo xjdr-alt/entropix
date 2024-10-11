@@ -1,50 +1,24 @@
 import torch
 import torch.nn as nn
 
-# Device selection, tree is like first apple silicion, then cuda, fallback is cpu.
-if torch.backends.mps.is_available():
-    device = torch.device("mps")
-elif torch.cuda.is_available():
-    device = torch.device("cuda")
-else:
-    device = torch.device("cpu")
-
-#print(f"Using device: {device}")
 
 class KVCache(nn.Module):
     def __init__(self, layers: int, bsz: int, max_seq_len: int, kv_heads: int, head_dim: int):
         super(KVCache, self).__init__()
         # Initialize k and v as buffers to ensure they're part of the module state
         self.register_buffer(
-            'k',
-            torch.zeros(
-                (layers, bsz, max_seq_len, kv_heads, head_dim),
-                dtype=torch.bfloat16,
-                device=device
-            )
+            "k", torch.zeros((layers, bsz, max_seq_len, kv_heads, head_dim), dtype=torch.bfloat16)
         )
         self.register_buffer(
-            'v',
-            torch.zeros(
-                (layers, bsz, max_seq_len, kv_heads, head_dim),
-                dtype=torch.bfloat16,
-                device=device
-            )
+            "v", torch.zeros((layers, bsz, max_seq_len, kv_heads, head_dim), dtype=torch.bfloat16)
         )
 
     @classmethod
-    def new(cls, layers: int, bsz: int, max_seq_len: int, kv_heads: int, head_dim: int) -> 'KVCache':
+    def new(cls, layers: int, bsz: int, max_seq_len: int, kv_heads: int, head_dim: int) -> "KVCache":
         """Creates a new KVCache instance with initialized k and v tensors."""
         return cls(layers, bsz, max_seq_len, kv_heads, head_dim)
 
-    def update(
-        self,
-        xk: torch.Tensor,
-        xv: torch.Tensor,
-        layer_idx: int,
-        cur_pos: int,
-        n_rep: int
-    ):
+    def update(self, xk: torch.Tensor, xv: torch.Tensor, layer_idx: int, cur_pos: int, n_rep: int):
         """
         Updates the cache with new key and value tensors.
 
@@ -60,11 +34,10 @@ class KVCache(nn.Module):
                 - keys: Updated or repeated keys tensor.
                 - values: Updated or repeated values tensor.
         """
-
         # Update the k and v tensors in the specified layer and position
         bsz, insert_len, _, _ = xk.shape  # Assuming xk shape is (bsz, insert_len, kv_heads, head_dim)
-        self.k[layer_idx, :bsz, cur_pos:cur_pos+insert_len, :, :] = xk
-        self.v[layer_idx, :bsz, cur_pos:cur_pos+insert_len, :, :] = xv
+        self.k[layer_idx, :bsz, cur_pos : cur_pos + insert_len, :, :] = xk.to(torch.bfloat16)
+        self.v[layer_idx, :bsz, cur_pos : cur_pos + insert_len, :, :] = xv.to(torch.bfloat16)
 
         if cur_pos == 0:
             # If inserting at the beginning, repeat the new keys and values
@@ -74,8 +47,6 @@ class KVCache(nn.Module):
             # Otherwise, repeat the existing keys and values from the cache
             keys = self.k[layer_idx].repeat_interleave(n_rep, dim=2)
             values = self.v[layer_idx].repeat_interleave(n_rep, dim=2)
-        keys = keys[: bsz].to(xk.dtype)
-        values = values[: bsz].to(xv.dtype)
         return keys, values, self
 
     def clear(self):
