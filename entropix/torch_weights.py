@@ -38,15 +38,15 @@ class XfmrWeights(NamedTuple):
   layer_weights: List[LayerWeights]
 
 def compare_outputs(torch_output: torch.Tensor, jax_output: jax.Array, atol: float = 1e-5, rtol: float = 1e-8) -> None:
-  jax_output_np = np.array(jax_output)
-  torch_output_np = torch_output.cpu().view(dtype=torch.uint16).numpy().view(ml_dtypes.bfloat16)
+    jax_output_np = np.array(jax_output)
+    torch_output_np = torch_output.cpu().numpy()
 
-  try:
-    np.testing.assert_allclose(torch_output_np, jax_output_np, atol=atol, rtol=rtol)
-  except AssertionError as e:
-    print(f'JAX output (first 30): {jax_output_np.flatten()[:30]}')
-    print(f'PyTorch output (first 30): {torch_output_np.flatten()[:30]}')
-    raise e
+    try:
+        np.testing.assert_allclose(torch_output_np, jax_output_np, atol=atol, rtol=rtol)
+    except AssertionError as e:
+        print(f'JAX output (first 30): {jax_output_np.flatten()[:30]}')
+        print(f'PyTorch output (first 30): {torch_output_np.flatten()[:30]}')
+        raise e
 
 def load_weights(ckpt_dir: Path = Path('weights/1B-Instruct'), n_layers: int = 16, should_compare_outputs: bool = False) -> XfmrWeights:
   w = {}
@@ -57,7 +57,7 @@ def load_weights(ckpt_dir: Path = Path('weights/1B-Instruct'), n_layers: int = 1
       jax_weight = jnp.load(file=file, mmap_mode='r', allow_pickle=True)
       #print(f'JAX output (first 30): {jax_weight.flatten()[:30]}')
       np_weight = np.array(jax_weight).astype(np.float32)
-      weight = torch.from_numpy(np_weight).to(torch.bfloat16).to(device)
+      weight = torch.from_numpy(np_weight).to(device)
       if should_compare_outputs:
         compare_outputs(torch_output=weight, jax_output=jax_weight)
       w[name] = weight.to(device)
