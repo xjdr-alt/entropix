@@ -1,23 +1,15 @@
-from typing import NamedTuple, Optional, Tuple
-
 import torch
-import torch.nn.functional as F
-
-import math
 import tyro
-
 from pathlib import Path
-from functools import partial
 
 from config import LLAMA_1B_PARAMS
 from tokenizer import Tokenizer
 from torch_kvcache import KVCache
 from torch_model import xfmr
-from torch_weights import XfmrWeights, LayerWeights, load_weights
+from torch_weights import load_weights
 from torch_sampler import sample
 from prompts import prompt, bp1
 
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 # Device selection, tree is like first apple silicion, then cuda, fallback is cpu.
@@ -93,13 +85,11 @@ def main():
   with torch.inference_mode():
     model_params = LLAMA_1B_PARAMS
     xfmr_weights = load_weights()
-
     tokenizer = Tokenizer('tokenizer.model')
     raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
     #this is not used in this script, but can be used to generate base_raw_tokens1
     base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False, allowed_special='all')
-
-
+    
     def generate(xfmr_weights, model_params, tokens):
       gen_tokens = None
       cur_pos = 0
@@ -107,7 +97,7 @@ def main():
       bsz, seqlen = tokens.shape
       attn_mask = build_attn_mask(seqlen, cur_pos)
       freqs_cis = precompute_freqs_cis(model_params.head_dim, model_params.max_seq_len, model_params.rope_theta, model_params.use_scaled_rope)
-      kvcache = KVCache.new(model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim).to(DEVICE)
+      kvcache = KVCache.new(model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim).to(device)
       logits, kvcache, _, _ = xfmr(xfmr_weights, model_params, tokens, cur_pos, freqs_cis[:seqlen], kvcache, attn_mask=attn_mask)
       next_token = torch.argmax(logits[:, -1], dim=-1, keepdim=True).to(torch.int32)
       gen_tokens = next_token
