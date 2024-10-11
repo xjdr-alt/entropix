@@ -9,13 +9,13 @@ import tyro
 from pathlib import Path
 from functools import partial
 
-from entropix.config import LLAMA_1B_PARAMS
-from entropix.tokenizer import Tokenizer
-from entropix.torch_kvcache import KVCache
-from entropix.torch_model import xfmr
-from entropix.torch_weights import XfmrWeights, LayerWeights, load_weights
-from entropix.torch_sampler import sample
-from entropix.prompts import prompt, bp1
+from config import LLAMA_1B_PARAMS
+from tokenizer import Tokenizer
+from torch_kvcache import KVCache
+from torch_model import xfmr
+from torch_weights import XfmrWeights, LayerWeights, load_weights
+from torch_sampler import sample
+from prompts import prompt, bp1
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
