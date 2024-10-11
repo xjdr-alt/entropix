@@ -60,14 +60,11 @@ class KVCache(nn.Module):
                 - keys: Updated or repeated keys tensor.
                 - values: Updated or repeated values tensor.
         """
-        # Ensure xk and xv have the correct device and dtype
-        xk = xk.to(self.k.dtype)
-        xv = xv.to(self.v.dtype)
 
         # Update the k and v tensors in the specified layer and position
-        insert_len = xk.size(1)  # Assuming xk shape is (bsz, insert_len, kv_heads, head_dim)
-        self.k[layer_idx, :, cur_pos:cur_pos+insert_len, :, :] = xk
-        self.v[layer_idx, :, cur_pos:cur_pos+insert_len, :, :] = xv
+        bsz, insert_len, _, _ = xk.shape  # Assuming xk shape is (bsz, insert_len, kv_heads, head_dim)
+        self.k[layer_idx, :bsz, cur_pos:cur_pos+insert_len, :, :] = xk
+        self.v[layer_idx, :bsz, cur_pos:cur_pos+insert_len, :, :] = xv
 
         if cur_pos == 0:
             # If inserting at the beginning, repeat the new keys and values
@@ -77,7 +74,8 @@ class KVCache(nn.Module):
             # Otherwise, repeat the existing keys and values from the cache
             keys = self.k[layer_idx].repeat_interleave(n_rep, dim=2)
             values = self.v[layer_idx].repeat_interleave(n_rep, dim=2)
-
+        keys = keys[: bsz].to(xk.dtype)
+        values = values[: bsz].to(xv.dtype)
         return keys, values, self
 
     def clear(self):
