@@ -94,7 +94,7 @@ def main():
     model_params = LLAMA_1B_PARAMS
     xfmr_weights = load_weights()
 
-    tokenizer = Tokenizer('entropix/tokenizer.model')
+    tokenizer = Tokenizer('tokenizer.model')
     raw_tokens1 = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
     #this is not used in this script, but can be used to generate base_raw_tokens1
     base_raw_tokens1 = tokenizer.encode(bp1, bos=True, eos=False, allowed_special='all')
