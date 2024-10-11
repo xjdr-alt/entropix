@@ -48,7 +48,7 @@ def compare_outputs(torch_output: torch.Tensor, jax_output: jax.Array, atol: flo
     print(f'PyTorch output (first 30): {torch_output_np.flatten()[:30]}')
     raise e
 
-def load_weights(ckpt_dir: Path = Path('weights/1B-Instruct'), n_layers: int = 16):
+def load_weights(ckpt_dir: Path = Path('weights/1B-Instruct'), n_layers: int = 16, should_compare_outputs: bool = False) -> XfmrWeights:
   w = {}
   layer_weights = []
   with torch.inference_mode():
@@ -58,7 +58,8 @@ def load_weights(ckpt_dir: Path = Path('weights/1B-Instruct'), n_layers: int = 1
       #print(f'JAX output (first 30): {jax_weight.flatten()[:30]}')
       np_weight = np.array(jax_weight).astype(np.float32)
       weight = torch.from_numpy(np_weight).to(torch.bfloat16).to(device)
-      compare_outputs(torch_output=weight, jax_output=jax_weight)
+      if should_compare_outputs:
+        compare_outputs(torch_output=weight, jax_output=jax_weight)
       w[name] = weight.to(device)
     for i in range(n_layers):
       layer_weights.append(LayerWeights(
