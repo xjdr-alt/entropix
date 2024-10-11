@@ -1,3 +1,4 @@
+# This code tests the torch and jax implementations at float32 with JIT compilation for jax except for attention
 import pytest
 import jax
 import jax.numpy as jnp
@@ -72,9 +73,7 @@ def compare_outputs(
     else:
         torch_output_np = torch_output.cpu().numpy()
 
-    assert (
-        jax_output_np.shape == torch_output_np.shape
-    ), f"Shapes do not match: {jax_output_np.shape} vs {torch_output_np.shape}"
+    assert jax_output_np.shape == torch_output_np.shape, f"Shapes do not match: {jax_output_np.shape} vs {torch_output_np.shape}"
 
     np.testing.assert_allclose(torch_output_np, jax_output_np, atol=atol, rtol=rtol)
 
@@ -88,12 +87,8 @@ def get_inputs(shape, torch_dtype, jax_dtype):
 
 
 def build_fresh_kvcache(bsz, model_params):
-    torch_kvcache = TorchKVCache.new(
-        model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim
-    ).to(device)
-    jax_kvcache = JaxKVCache.new(
-        model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim
-    )
+    torch_kvcache = TorchKVCache.new(model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim).to(device)
+    jax_kvcache = JaxKVCache.new(model_params.n_layers, bsz, model_params.max_seq_len, model_params.n_local_kv_heads, model_params.head_dim)
     return torch_kvcache, jax_kvcache
 
 
@@ -161,12 +156,8 @@ def model_setup():
     attn_mask_torch = build_attn_mask_torch(seqlen, cur_pos)
     attn_mask_jax = build_attn_mask_jax(seqlen, cur_pos)
 
-    freqs_cis_torch = precompute_freqs_cis_torch(
-        model_params.head_dim, model_params.max_seq_len, model_params.rope_theta, model_params.use_scaled_rope
-    )
-    freqs_cis_jax = precompute_freqs_cis_jax(
-        model_params.head_dim, model_params.max_seq_len, model_params.rope_theta, model_params.use_scaled_rope
-    )
+    freqs_cis_torch = precompute_freqs_cis_torch(model_params.head_dim, model_params.max_seq_len, model_params.rope_theta, model_params.use_scaled_rope)
+    freqs_cis_jax = precompute_freqs_cis_jax(model_params.head_dim, model_params.max_seq_len, model_params.rope_theta, model_params.use_scaled_rope)
 
     return ModelTestSetup(
         model_params=model_params,
@@ -243,9 +234,7 @@ def test_rope(model_setup: ModelTestSetup):
             jnp.bfloat16,
         )
 
-        torch_xq, torch_xk = torch_apply_rotary_emb(
-            torch_xq, torch_xk, model_setup.freqs_cis_torch[: model_setup.seqlen]
-        )
+        torch_xq, torch_xk = torch_apply_rotary_emb(torch_xq, torch_xk, model_setup.freqs_cis_torch[: model_setup.seqlen])
         jax_xq, jax_xk = jax_apply_rotary_emb(jax_xq, jax_xk, model_setup.freqs_cis_jax[: model_setup.seqlen])
 
         compare_outputs(torch_xq, jax_xq)
@@ -316,6 +305,7 @@ def test_feedforward(model_setup: ModelTestSetup):
 def test_each_layer(model_setup: ModelTestSetup):
     with torch.no_grad():
         for idx in range(model_setup.model_params.n_layers):
+            torch_kvcache, jax_kvcache = build_fresh_kvcache(model_setup.bsz, model_setup.model_params)
             torch_h, jax_h = get_inputs(
                 (
                     model_setup.bsz,
@@ -328,8 +318,6 @@ def test_each_layer(model_setup: ModelTestSetup):
             compare_outputs(torch_h, jax_h)
             torch_layer = model_setup.torch_weights.layer_weights[idx]
             jax_layer = model_setup.jax_weights.layer_weights[idx]
-            # Build a fresh kvcache at each layer because internally the cache is stored as bf16 but compute is done at fp32 and the conversion is not the same in torch and jax
-            torch_kvcache, jax_kvcache = build_fresh_kvcache(model_setup.bsz, model_setup.model_params)
 
             torch_norm_x = torch_rms_norm(x=torch_h, w=torch_layer.attention_norm)
             jax_norm_x = jax_rms_norm(x=jax_h, w=jax_layer.attention_norm)
@@ -362,8 +350,7 @@ def test_each_layer(model_setup: ModelTestSetup):
 
             torch_h = torch_h + torch_h_attn
             jax_h = jax_h + jax_h_attn
-            compare_outputs(torch_h, jax_h)  # The addition operation leads to 1 mismatch
-
+            compare_outputs(torch_h, jax_h)
             torch_ff_norm_out = torch_rms_norm(x=torch_h, w=torch_layer.ffn_norm)
             jax_ff_norm_out = jax_rms_norm(x=jax_h, w=jax_layer.ffn_norm)
             compare_outputs(torch_ff_norm_out, jax_ff_norm_out)
@@ -374,7 +361,7 @@ def test_each_layer(model_setup: ModelTestSetup):
 
             torch_h = torch_h + torch_ffn_out
             jax_h = jax_h + jax_ffn_out
-            compare_outputs(torch_h, jax_h)  # The addition operation leads to 1 mismatch
+            compare_outputs(torch_h, jax_h)
 
 
 def test_last_linear_head(model_setup: ModelTestSetup):
