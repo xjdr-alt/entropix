@@ -43,6 +43,9 @@ def attention(x: torch.Tensor, layer_weights: LayerWeights, model_params, cur_po
     xk = F.linear(x, layer_weights.wk).reshape(bsz, -1, model_params.n_local_kv_heads, model_params.head_dim)
     xv = F.linear(x, layer_weights.wv).reshape(bsz, -1, model_params.n_local_kv_heads, model_params.head_dim)
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
+    # Apply sphere packing after rotary embeddings
+    xq = sphere_pack_embeddings(xq, model_params.n_local_heads, model_params.head_dim)
+    xk = sphere_pack_embeddings(xk, model_params.n_local_kv_heads, model_params.head_dim)
     keys, values, kvcache = kvcache.update(xk, xv, layer_idx, cur_pos, n_rep)
     xq = torch.permute(xq, (0, 2, 1, 3))  # (bs, n_heads, seqlen, head_dim)
     keys = torch.permute(keys, (0, 2, 3, 1))  # (bs, n_heads, head_dim, cache_len + seqlen)
@@ -59,6 +62,14 @@ def attention(x: torch.Tensor, layer_weights: LayerWeights, model_params, cur_po
     output = output.transpose(1, 2).reshape(xq.shape[0], xq.shape[2], -1)
     out = F.linear(output, layer_weights.wo)
     return out, kvcache, pre_scores
+
+def sphere_pack_embeddings(x, num_heads, head_dim):
+    # Normalize the embeddings to lie on a unit sphere
+    packed_x = x / torch.norm(x, dim=-1, keepdim=True)  
+    # Apply scaling to simulate packing and maximize distance
+    scale_factors = torch.linspace(0.8, 1.2, num_heads).unsqueeze(1)
+    packed_x = packed_x * scale_factors.to(packed_x.device)   
+    return packed_x
 
 def feed_forward(x: torch.Tensor, layer_weights: LayerWeights) -> torch.Tensor:
  return F.linear(F.silu(F.linear(x, layer_weights.w1)) * F.linear(x, layer_weights.w3), layer_weights.w2)
