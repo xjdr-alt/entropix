@@ -3,7 +3,7 @@ Entropy Based Sampling and Parallel CoT Decoding
 
 The goal is to use entropy to make context aware sampling. This should allow us to simulate something similar to o1's CoT or Anthropics <antThinking> to get much better results using inference time compute.
 
-This project is a research project and a work in process. Its comprised of an inference stack, the sampler, and a UI (future). Please reach out to me on X if you have any question or concerns @_xjdr
+This project is a research project and a work in process. It comprises an inference stack, the sampler, and a UI (future). Please reach out to me on X if you have any question or concerns @_xjdr
 
 
 # UPDATE !!!!
