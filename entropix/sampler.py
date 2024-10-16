@@ -7,126 +7,7 @@ import jax.numpy as jnp
 
 LN_2 = 0.69314718056  # ln(2) = 1.0 / LOG2_E
 
-# ANSI escape sequences for text formatting
-ANSI_RESET = "\033[0m"
-ANSI_BOLD = "\033[1m"
-ANSI_ITALIC = "\033[3m"
-ANSI_DIM = "\033[2m"
 
-# Catppuccin color palette
-COLORS = {
-    "rosewater": (244, 194, 193),
-    "flamingo": (242, 150, 160),
-    "pink": (245, 140, 173),
-    "mauve": (203, 166, 247),
-    "red": (243, 139, 168),
-    "maroon": (235, 160, 172),
-    "peach": (250, 179, 135),
-    "yellow": (249, 226, 175),
-    "green": (166, 227, 161),
-    "teal": (148, 226, 213),
-    "sky": (137, 220, 235),
-    "sapphire": (116, 199, 236),
-    "blue": (137, 180, 250),
-    "lavender": (180, 190, 254),
-    "text": (205, 214, 244),
-    "subtext1": (186, 194, 222),
-    "subtext0": (166, 173, 200),
-    "overlay2": (147, 153, 178),
-    "overlay1": (127, 132, 156),
-    "overlay0": (108, 112, 134),
-    "surface2": (88, 91, 112),
-    "surface1": (69, 71, 90),
-    "surface0": (49, 50, 68),
-    "base": (30, 30, 46),
-    "mantle": (24, 24, 37),
-    "crust": (17, 17, 27)
-}
-
-def blend_colors(color1: Tuple[int, int, int], color2: Tuple[int, int, int], weight: float = 0.5) -> Tuple[int, int, int]:
-    # Use a power function to emphasize brighter colors
-    emphasis = 2.0
-    w1 = weight ** (1/emphasis)
-    w2 = (1 - weight) ** (1/emphasis)
-
-    blended = tuple(int(((c1/255)**emphasis * w1 + (c2/255)**emphasis * w2) ** (1/emphasis) * 255)
-                    for c1, c2 in zip(color1, color2))
-
-    # Ensure the result is within valid RGB range
-    blended = tuple(max(0, min(255, c)) for c in blended)
-
-    #print(f"Debug: Blend result: {blended} (color1: {color1}, color2: {color2}, weight: {weight})", file=sys.stderr, flush=True)
-    return blended
-
-def get_color_for_metric(metrics: Dict[str, float], config) -> Tuple[Tuple[int, int, int], str]:
-    """Get color and formatting for metrics based on their values and thresholds."""
-    ent = metrics["logits_entropy"]
-    vent = metrics["logits_varentropy"]
-    attn_ent = metrics["attn_entropy"]
-    attn_vent = metrics["attn_varentropy"]
-    agreement = metrics["agreement"]
-    interaction_strength = metrics["interaction_strength"]
-
-    color = COLORS["text"]  # Start with default text color
-    formatting = ""
-
-    # Logits Entropy
-    if ent < config.low_logits_entropy_threshold:
-        color = blend_colors(color, COLORS["blue"], 0.7)
-    elif ent < config.medium_logits_entropy_threshold:
-        color = blend_colors(color, COLORS["sky"], 0.7)
-    elif ent < config.high_logits_entropy_threshold:
-        color = blend_colors(color, COLORS["sapphire"], 0.7)
-    else:
-        color = blend_colors(color, COLORS["lavender"], 0.7)
-
-    # Logits Varentropy
-    if vent < config.low_logits_varentropy_threshold:
-        color = blend_colors(color, COLORS["green"], 0.3)
-    elif vent < config.medium_logits_varentropy_threshold:
-        color = blend_colors(color, COLORS["teal"], 0.3)
-    elif vent < config.high_logits_varentropy_threshold:
-        color = blend_colors(color, COLORS["yellow"], 0.3)
-    else:
-        color = blend_colors(color, COLORS["peach"], 0.3)
-
-    # Attention Entropy
-    if attn_ent < config.low_attention_entropy_threshold:
-        formatting += ANSI_BOLD
-    elif attn_ent > config.high_attention_entropy_threshold:
-        formatting += ANSI_ITALIC
-
-    # Attention Varentropy
-    if attn_vent < config.low_attention_varentropy_threshold:
-        color = blend_colors(color, COLORS["rosewater"], 0.2)
-    elif attn_vent < config.medium_attention_varentropy_threshold:
-        color = blend_colors(color, COLORS["flamingo"], 0.2)
-    elif attn_vent < config.high_attention_varentropy_threshold:
-        color = blend_colors(color, COLORS["pink"], 0.2)
-    else:
-        color = blend_colors(color, COLORS["mauve"], 0.2)
-
-    # Agreement
-    if agreement < config.low_agreement_threshold:
-        formatting += ANSI_DIM
-    elif agreement > config.high_agreement_threshold:
-        color = blend_colors(color, COLORS["red"], 0.2)
-
-    # Interaction Strength
-    if interaction_strength < config.low_interaction_strength_threshold:
-        color = blend_colors(color, COLORS["surface2"], 0.1)
-    elif interaction_strength < config.medium_interaction_strength_threshold:
-        color = blend_colors(color, COLORS["surface1"], 0.1)
-    elif interaction_strength < config.high_interaction_strength_threshold:
-        color = blend_colors(color, COLORS["surface0"], 0.1)
-    else:
-        color = blend_colors(color, COLORS["base"], 0.1)
-
-    return color, formatting
-
-
-
-@jax.jit
 def calculate_varentropy_logsoftmax(logits: jnp.ndarray, axis: int = -1) -> Tuple[jnp.ndarray, jnp.ndarray]:
     """Calculate the entropy and varentropy of the probability distribution using logsoftmax."""
     log_probs = jax.nn.log_softmax(logits, axis=axis)
@@ -167,14 +48,11 @@ def _sample( logits: jax.Array, *, temperature: float | jax.Array, top_p: float 
 
 def calculate_metrics(logits: jnp.ndarray, attention_scores: jnp.ndarray) -> Dict[str, jnp.ndarray]:
     entropy, varentropy = calculate_varentropy_logsoftmax(logits)
-
     attention_probs = jax.nn.softmax(attention_scores, axis=-1)
     attn_entropy = -jnp.sum(attention_probs * jnp.log2(jnp.clip(attention_probs, 1e-10, 1.0)), axis=-1)
     attn_varentropy = jnp.var(attn_entropy, axis=1)
-
     mean_attention = jnp.mean(attention_probs, axis=1)
     agreement = jnp.mean(jnp.abs(attention_probs - mean_attention[:, None, :]), axis=(1, 2))
-
     interaction_strength = jnp.mean(jnp.abs(attention_scores), axis=(1, 2, 3))
 
     return {
@@ -188,11 +66,6 @@ def calculate_metrics(logits: jnp.ndarray, attention_scores: jnp.ndarray) -> Dic
 
 @chex.dataclass(kw_only=True, frozen=True)
 class SamplerConfig:
-    """
-    Configuration for the sampling strategy, including threshold values for various metrics
-    and adaptive sampling parameters.
-    """
-
     # Sampling Hyperparameters
     temperature: float = 0.666
     top_p: float = 0.90
@@ -257,7 +130,7 @@ class SamplerConfig:
     adaptive_score_interaction_strength_coefficient: float = 0.6
 
 
-def sample(gen_tokens: jax.Array, logits: jax.Array, attention_scores: jax.Array, cfg: SamplerConfig,
+def sample(logits: jax.Array, attention_scores: jax.Array, cfg: SamplerConfig,
            clarifying_question_token: int = 2564, key=jax.random.PRNGKey(1337)) -> jax.Array:
 
     metrics = calculate_metrics(logits, attention_scores)
@@ -265,7 +138,6 @@ def sample(gen_tokens: jax.Array, logits: jax.Array, attention_scores: jax.Array
     attn_ent, attn_vent = metrics["attn_entropy"], metrics["attn_varentropy"]
     agreement = metrics["agreement"]
     interaction_strength = metrics["interaction_strength"]
-    color = get_color_for_metric(metrics ,cfg)
     #print(f'{metrics=}')
 
     # Low Entropy, Low Varentropy: "flowing with unspoken intent"
@@ -275,7 +147,7 @@ def sample(gen_tokens: jax.Array, logits: jax.Array, attention_scores: jax.Array
         attn_vent < cfg.low_attention_varentropy_threshold and
         agreement < cfg.low_agreement_threshold and
         interaction_strength < cfg.low_interaction_strength_threshold):
-        return jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32), color
+        return jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
 
     # High Entropy, Low Varentropy: "treading carefully, asking clarifying questions"
     elif (ent > cfg.high_logits_entropy_threshold and
@@ -297,7 +169,7 @@ def sample(gen_tokens: jax.Array, logits: jax.Array, attention_scores: jax.Array
                 top_k=cfg.top_k,
                 min_p=cfg.min_probability,
                 key=key
-            ), color
+            )
 
     # Low Entropy, High Varentropy: "exploring forks in the path"
     elif (ent < cfg.high_logits_entropy_threshold and
@@ -315,7 +187,7 @@ def sample(gen_tokens: jax.Array, logits: jax.Array, attention_scores: jax.Array
             top_k=top_k_adj,
             min_p=cfg.min_probability,
             key=key
-        ), color
+        )
 
     # High Entropy, High Varentropy: "resampling in the mist"
     elif (ent > cfg.medium_logits_entropy_threshold and
@@ -334,7 +206,7 @@ def sample(gen_tokens: jax.Array, logits: jax.Array, attention_scores: jax.Array
             top_k=cfg.top_k,
             min_p=cfg.min_probability,
             key=key
-        ), color
+        )
 
     # Middle ground: use adaptive sampling
     else:
@@ -398,4 +270,4 @@ def sample(gen_tokens: jax.Array, logits: jax.Array, attention_scores: jax.Array
 
         sample_scores = jnp.array([score_sample(sample) for sample in samples])
         best_sample_idx = jnp.argmax(sample_scores)
-        return samples[best_sample_idx], color
+        return samples[best_sample_idx]
