@@ -38,6 +38,12 @@ lm-eval = "^0.4.4"
 langdetect = "^1.0.9"
 immutabledict = "^4.2.0"
 
+
+[tool.poetry.group.engine.dependencies]
+uvicorn = "^0.32.0"
+pydantic = "^2.9.2"
+fastapi = "^0.115.2"
+
 [[tool.poetry.source]]
 name = "pytorch"
 url = "https://download.pytorch.org/whl/cu124"

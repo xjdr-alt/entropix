@@ -1,3 +1,4 @@
+import functools
 from typing import NamedTuple
 
 import jax
@@ -9,6 +10,7 @@ class KVCache(NamedTuple):
   v: jax.Array
 
   @classmethod
+  @functools.partial(jax.jit, static_argnums=(0,1,2,3,4,5))
   def new(cls, layers: int, bsz: int, max_seq_len: int, kv_heads: int, head_dim: int) -> 'KVCache':
     return cls(
         k=jnp.zeros((layers, bsz, max_seq_len, kv_heads, head_dim), dtype=jnp.bfloat16),

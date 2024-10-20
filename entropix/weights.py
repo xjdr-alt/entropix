@@ -51,7 +51,7 @@ def create_partition_spec(key):
 def load_weights(ckpt_dir: Path, n_layers: int = 80):
     w = {}
     layer_weights = []
-    mesh = jax.sharding.Mesh(mesh_utils.create_device_mesh((1, 8)), ('mp', 'fsdp'))
+    mesh = jax.sharding.Mesh(mesh_utils.create_device_mesh((1, 1)), ('mp', 'fsdp'))
     
     for file in ckpt_dir.glob("*.npy"):
         name = '.'.join(str(file).split('/')[-1].split('.')[:-1])

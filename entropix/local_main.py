@@ -61,8 +61,8 @@ def build_attn_mask(seqlen: int, start_pos: int) -> jax.Array:
     mask = jnp.hstack([jnp.zeros((seqlen, start_pos)), mask], dtype=jnp.float32)
   return mask
 
-#def main(weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('1B-Instruct')):
-def main(weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('70B-Nemotron-Instruct')):
+def main(weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('1B-Instruct')):
+#def main(weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('70B-Nemotron-Instruct')):
   model_params = LLAMA_1B_PARAMS
   xfmr_weights = load_weights(weights_path.absolute(), n_layers=model_params.n_layers)
   tokenizer = Tokenizer('entropix/tokenizer.model')
@@ -88,7 +88,7 @@ def main(weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('70B-Nemotron-Instru
     while cur_pos < 8192:
       cur_pos += 1
       logits, kvcache, scores, stats = xfmr_fn(xfmr_weights, model_params, next_token, cur_pos, freqs_cis[cur_pos:cur_pos+1], kvcache)
-      next_token = sample(logits, scores, cfg=sampler_cfg)
+      next_token = sample(logits, scores, cur_pos, cfg=sampler_cfg)
       gen_tokens.append(next_token)
       out_token = tokenizer.decode(next_token.tolist()[0])
       print(out_token, end='', flush=True)
@@ -100,11 +100,14 @@ def main(weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('70B-Nemotron-Instru
 Cutting Knowledge Date: December 2023
 Today Date: 23 July 2024
 
-You are a helpful assistant<|eot_id|><|start_header_id|>user<|end_header_id|>
- 
-Think carefully in a step-by-step manner. Oliver picks 44 kiwis on Friday. Then he picks 58 kiwis on Saturday. On Sunday, he picks double the number of kiwis he did on Friday, but five of them were a bit smaller than average. How many kiwis does Oliver have?<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+You are a world-class AI system, capable of complex reasoning and reflection.<|eot_id|><|start_header_id|>user<|end_header_id|>
+
+Sort the numbers from highest to lowest: 9.1, 9.8, 9.11, 9.9, 9.12<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
 """
+  #Think carefully in a step-by-step manner. Can you write a python agent that generates passwords with modern best practices?<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+  #Think carefully in a step-by-step manner. Oliver picks 44 kiwis on Friday. Then he picks 58 kiwis on Saturday. On Sunday, he picks double the number of kiwis he did on Friday, but five of them were a bit smaller than average. How many kiwis does Oliver have?<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+  #Think carefully in a step-by-step manner. which number is larger, 9.9 or 9.11?<|eot_id|><|start_header_id|>assistant<|end_header_id|>
   print(prompt)
   tokens = tokenizer.encode(prompt,  bos=False, eos=False, allowed_special='all')
   generate(xfmr_weights, model_params, tokens)

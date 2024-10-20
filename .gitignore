@@ -2,6 +2,8 @@ git-describe.txt
 .vscode/
 attic/
 weights/
+entropix/data
+convert.py
 
 
 # boilerplate from here on down
