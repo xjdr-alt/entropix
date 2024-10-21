@@ -201,10 +201,10 @@ class CustomLLaMAModel(LM):
 
 def main(
     weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('1B-Instruct'),
-    # tasks: List[str] = ["gsm8k_cot_llama"],
+    tasks: List[str] = ["gsm8k_cot_llama"],
     # tasks: List[str] = ["gsm8k_cot"],
     # tasks: List[str] = ["gsm8k"],
-    tasks: List[str] = ["gsm8k_cot_zeroshot"],
+    # tasks: List[str] = ["gsm8k_cot_zeroshot"],
 ):
 
     tasks_dict: Dict[str, Task] = lm_eval.tasks.get_task_dict(tasks)
