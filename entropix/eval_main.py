@@ -74,7 +74,8 @@ class CustomLLaMAModel(LM):
         super().__init__()
         self.model_params = LLAMA_1B_PARAMS
         self.xfmr_weights = load_weights(weights_path.absolute())
-        self.tokenizer = Tokenizer('entropix/tokenizer.model')
+        self.tokenizer = Tokenizer("entropix/tokenizer.model")
+        self._tokenizer_name = "meta-llama/Llama-3.2-1B-Instruct"
         self.freqs_cis = precompute_freqs_cis(
             self.model_params.head_dim,
             self.model_params.max_seq_len,
@@ -190,32 +191,35 @@ class CustomLLaMAModel(LM):
     def device(self) -> str:
         return 'cuda'  # Adjust if using GPU/TPU
 
+    @property
+    def tokenizer_name(self) -> str:
+        return self._tokenizer_name
+
+    @tokenizer_name.setter
+    def tokenizer_name(self, value: str):
+        self._tokenizer_name = value
+
 def main(
     weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('1B-Instruct'),
-    # tasks: List[str] = ["gpqa"],
     tasks: List[str] = ["gsm8k_cot_llama"],
-    # num_fewshot: int = 5,
 ):
 
     tasks_dict: Dict[str, Task] = lm_eval.tasks.get_task_dict(tasks)
-    tasks_list = list(tasks_dict.values())
+    tasks_list: List[Task] = list(tasks_dict.values())
 
     model = CustomLLaMAModel(weights_path)
 
     results = simple_evaluate(
         model=model,
-        # tasks=tasks,
         tasks=tasks_list,
         # limit=1,
-        limit=30,
+        limit=2,
+        # apply_chat_template=True,
+        # fewshot_as_multiturn=True,
     )
 
-    # Create a TaskOutput object
-    # output = TaskOutput(results)
-    # output = TaskOutput.from_taskdict("gsm8k_cot_llama", tasks_dict["gsm8k_cot_llama"])
 
     # Print the results in a formatted way
-    # print(output.formatted())
     print(make_table(results))
 
     # If you want to save the results to a file/
