@@ -15,19 +15,19 @@ params = {
   "max_seq_len": 4096
 }
 
-params = {
-  "dim": 8192,
-  "n_layers": 80,
-  "n_heads": 64,
-  "n_kv_heads": 8,
-  "vocab_size": 128256,
-  "ffn_dim_multiplier": 1.5,
-  "multiple_of": 256,
-  "norm_eps": 1e-05,
-  "rope_theta": 500000.0,
-  "use_scaled_rope": True,
-  "max_seq_len": 4096
-}
+# params = {
+#   "dim": 8192,
+#   "n_layers": 80,
+#   "n_heads": 64,
+#   "n_kv_heads": 8,
+#   "vocab_size": 128256,
+#   "ffn_dim_multiplier": 1.5,
+#   "multiple_of": 256,
+#   "norm_eps": 1e-05,
+#   "rope_theta": 500000.0,
+#   "use_scaled_rope": True,
+#   "max_seq_len": 4096
+# }
 
 
 class ModelParams(NamedTuple):

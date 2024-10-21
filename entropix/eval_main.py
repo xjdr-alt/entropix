@@ -1,5 +1,6 @@
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
+import json
 import math
 from pathlib import Path
 
@@ -7,14 +8,17 @@ import jax
 import jax.numpy as jnp
 import tyro
 
+import lm_eval
 from lm_eval import simple_evaluate
 from lm_eval.evaluator_utils import TaskOutput
 from lm_eval.api.model import LM
+from lm_eval.api.task import Task
+from lm_eval.utils import make_table
 
 from entropix.config import LLAMA_1B_PARAMS
 from entropix.kvcache import KVCache
 from entropix.model import xfmr
-from entropix.sampler import SamplerConfig, sample
+from entropix.sampler import SamplerConfig, _sample, sample
 from entropix.prompts import create_prompts_from_csv, prompt
 from entropix.sampler import sample
 from entropix.tokenizer import Tokenizer
@@ -97,7 +101,8 @@ class CustomLLaMAModel(LM):
         while cur_pos < min(self.model_params.max_seq_len, len(context_tokens) + max_tokens):
             cur_pos += 1
             logits, kvcache, scores, _ = xfmr(self.xfmr_weights, self.model_params, next_token, cur_pos, self.freqs_cis[cur_pos:cur_pos+1], kvcache)
-            next_token, _ = sample(gen_tokens, logits, scores, cfg=self.sampler_cfg)
+            # next_token, _ = sample(gen_tokens, logits, scores, cfg=self.sampler_cfg)
+            next_token = sample(logits, scores, cfg=self.sampler_cfg)
             gen_tokens = jnp.concatenate((gen_tokens, next_token))
             if jnp.isin(next_token, stop).any():
                 break
@@ -187,24 +192,36 @@ class CustomLLaMAModel(LM):
 
 def main(
     weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('1B-Instruct'),
-    tasks: List[str] = ["gpqa"],
-    num_fewshot: int = 5,
+    # tasks: List[str] = ["gpqa"],
+    tasks: List[str] = ["gsm8k_cot_llama"],
+    # num_fewshot: int = 5,
 ):
+
+    tasks_dict: Dict[str, Task] = lm_eval.tasks.get_task_dict(tasks)
+    tasks_list = list(tasks_dict.values())
+
     model = CustomLLaMAModel(weights_path)
 
     results = simple_evaluate(
         model=model,
-        tasks=tasks,
+        # tasks=tasks,
+        tasks=tasks_list,
+        # limit=1,
+        limit=30,
     )
 
     # Create a TaskOutput object
-    output = TaskOutput(results)
+    # output = TaskOutput(results)
+    # output = TaskOutput.from_taskdict("gsm8k_cot_llama", tasks_dict["gsm8k_cot_llama"])
 
     # Print the results in a formatted way
-    print(output.formatted())
+    # print(output.formatted())
+    print(make_table(results))
 
     # If you want to save the results to a file/
-    output.save_json("leaderboard.json")
+    # output.save_json("leaderboard.json")
+    with open("results.json", "w") as f:
+        json.dump(results, f)
 
 if __name__ == '__main__':
     tyro.cli(main)

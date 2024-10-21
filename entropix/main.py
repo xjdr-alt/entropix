@@ -61,8 +61,8 @@ def build_attn_mask(seqlen: int, start_pos: int) -> jax.Array:
     mask = jnp.hstack([jnp.zeros((seqlen, start_pos)), mask], dtype=jnp.float32)
   return mask
 
-#def main(weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('1B-Instruct')):
-def main(weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('70B-Nemotron-Instruct')):
+def main(weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('1B-Instruct')):
+# def main(weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('70B-Nemotron-Instruct')):
   model_params = LLAMA_1B_PARAMS
   xfmr_weights = load_weights(weights_path.absolute(), n_layers=model_params.n_layers)
   tokenizer = Tokenizer('entropix/tokenizer.model')
