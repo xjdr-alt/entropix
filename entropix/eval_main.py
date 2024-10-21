@@ -201,7 +201,10 @@ class CustomLLaMAModel(LM):
 
 def main(
     weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('1B-Instruct'),
-    tasks: List[str] = ["gsm8k_cot_llama"],
+    # tasks: List[str] = ["gsm8k_cot_llama"],
+    # tasks: List[str] = ["gsm8k_cot"],
+    # tasks: List[str] = ["gsm8k"],
+    tasks: List[str] = ["gsm8k_cot_zeroshot"],
 ):
 
     tasks_dict: Dict[str, Task] = lm_eval.tasks.get_task_dict(tasks)
@@ -213,7 +216,8 @@ def main(
         model=model,
         tasks=tasks_list,
         # limit=1,
-        limit=2,
+        # limit=2,
+        # limit=5,
         # apply_chat_template=True,
         # fewshot_as_multiturn=True,
     )
@@ -229,3 +233,6 @@ def main(
 
 if __name__ == '__main__':
     tyro.cli(main)
+    import datetime
+    current_time = datetime.datetime.now()
+    print(f"Current timestamp: {current_time}")
