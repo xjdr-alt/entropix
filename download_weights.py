@@ -87,20 +87,20 @@ def main(model_id: str, out_dir: Path):
             print(f' {hf_name}: {param.shape=}')
             name = translate_key(hf_name)
             if name.endswith('wq.weight'):
-                #param = reverse_permute(param, n_heads=32, dim1=2048, dim2=2048)  # 1B
+                param = reverse_permute(param, n_heads=32, dim1=2048, dim2=2048)  # 1B
                 #param = reverse_permute(param, n_heads=24, dim1=3072, dim2=3072)  # 3B
                 #param = reverse_permute(param, n_heads=32, dim1=4096, dim2=4096)  # 7B
-                param = reverse_permute(param, n_heads=64, dim1=8192, dim2=8192)   # 70B
+                #param = reverse_permute(param, n_heads=64, dim1=8192, dim2=8192)   # 70B
                 #param = reverse_permute(param, n_heads=96, dim1=12288, dim2=12288)   # 123B
                 #param = reverse_permute(param, n_heads=128, dim1=16384, dim2=16384) # 405B
                 #param = reverse_permute(param, n_heads=128, dim1=12288, dim2=12288) # DSV2
                 #param = reverse_permute(param, n_heads=64, dim1=12288, dim2=12288) # Commandr+
                 #param = reverse_permute(param, n_heads=48, dim1=6144, dim2=6144)    # Mixtral8x22B
             elif name.endswith('wk.weight'): #wk.weight
-                #param = reverse_permute(param, n_heads=8, dim1=512, dim2=2048)  # 1B
+                param = reverse_permute(param, n_heads=8, dim1=512, dim2=2048)  # 1B
                 #param = reverse_permute(param, n_heads=8, dim1=1024, dim2=3072)  # 3B
                 #param = reverse_permute(param, n_heads=8, dim1=1024, dim2=4096)  # 7B
-                param = reverse_permute(param, n_heads=8, dim1=1024, dim2=8192)   # 70B
+                #param = reverse_permute(param, n_heads=8, dim1=1024, dim2=8192)   # 70B
                 #param = reverse_permute(param, n_heads=8, dim1=1024, dim2=12288)   # 123B
                 #param = reverse_permute(param, n_heads=8, dim1=1024, dim2=16384)  # 405B
                 #param = reverse_permute(param, n_heads=128, dim1=12288, dim2=12288)  # DSV2
