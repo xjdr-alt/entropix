@@ -117,16 +117,20 @@ class CustomLLaMAModel(LM):
             until = request.args[1]
             context_tokens = self.tokenizer.encode(context, bos=False, eos=False, allowed_special='all')
             generated_tokens, _ = self._model_generate(context_tokens, self.max_gen_toks)
+            _res = []
             for t in generated_tokens:
-                decoded = self.tokenizer.decode(t)
+                _decoded = self.tokenizer.decode(t)
                 for stop_seq in until:
-                    if stop_seq in decoded:
-                        stop_index = decoded.index(stop_seq)
-                        decoded = decoded[:stop_index]
+                    if stop_seq in _decoded:
+                        stop_index = _decoded.index(stop_seq)
+                        _decoded = _decoded[:stop_index]
                         break
+                _res.append(_decoded)
+            decoded = ''.join(_res)
+            print(decoded)
+            res.append(decoded)
 
-                res.append(decoded)
-
+        print(res)
         return res
 
     def loglikelihood(self, requests):
@@ -218,6 +222,7 @@ def main(
         # limit=1,
         # limit=2,
         # limit=5,
+        limit=10,
         # apply_chat_template=True,
         # fewshot_as_multiturn=True,
     )
