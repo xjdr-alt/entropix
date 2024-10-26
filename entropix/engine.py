@@ -12,7 +12,6 @@ from jax.sharding import Mesh
 from jax.sharding import PartitionSpec as PS
 
 from entropix.kvcache import KVCache
-from entropix.model import xfmr
 from entropix.sampler import sample
 from entropix.tokenizer import Tokenizer
 
@@ -214,14 +213,13 @@ class ResultTokens(NamedTuple):
 
 
 class EntropixEngine:
-  def __init__(self, params: Params, xfmr_weights: XfmrWeights, tokenizer: Tokenizer):
+  def __init__(self, params: Params, xfmr_weights: XfmrWeights, tokenizer: Tokenizer, xfmr_fn: Callable, sample_fn: Callable):
     self.params = params
     self.xfmr_weights = xfmr_weights
     self.tokenizer = tokenizer
     self.freqs_cis = self.precompute_freqs_cis(params.head_dim, params.max_seq_len, params.rope_theta, params.use_scaled_rope)
-    self.xfmr_fn = jax.jit(xfmr, static_argnames=("model_params",))
-    self.sample_fn = jax.jit(sample)
-    #self.sample_fn = sample
+    self.xfmr_fn = xfmr_fn
+    self.sample_fn = sample_fn
 
   def get_prefix_destination_sharding(self) -> Any:
     """Returns the shardings necessary to transfer data between engines."""
@@ -254,6 +252,17 @@ class EntropixEngine:
     """Total samples per slot."""
     return 1
 
+  def free_resource(
+      self,
+      slot: int,  # pylint: disable=unused-argument
+  ) -> Any:
+    """Free cache and other decode resource for the slot.
+
+    This function is needed for advanced attetnion kenel like PageAttetion.
+    After finishing one request, the engine need to free all used page block
+    resource and reuse for coming requests.
+    """
+    return None
 
   @property
   def max_prefill_length(self) -> int:
@@ -310,7 +319,7 @@ class EntropixEngine:
       mask = jnp.hstack([jnp.zeros((seqlen, start_pos)), mask], dtype=jnp.float32)
     return mask
 
-  #@functools.partial(jax.jit, static_argnames=("self", "params"))
+  @functools.partial(jax.jit, static_argnames=("self", "params"))
   def prefill(
       self,
       *,
@@ -336,7 +345,6 @@ class EntropixEngine:
     kvcache = KVCache.new(params.n_layers, bsz, params.max_seq_len, params.n_local_kv_heads, params.head_dim)
     logits, kvcache, _ = self.xfmr_fn(self.xfmr_weights, params, padded_tokens, cur_pos, self.freqs_cis[:seqlen], kvcache, attn_mask=attn_mask)
     next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
-    print(self.tokenizer.decode(next_token.tolist()[0]), end='', flush=True)
     # Create arrays for tokens, validity, and lengths
     tokens = next_token
     validity = jnp.ones_like(next_token, dtype=jnp.bool_)
@@ -360,12 +368,12 @@ class EntropixEngine:
         "logits": logits,
         "cache": kvcache,
         "next_pos": seqlen,
-        "generated_tokens": next_token, # this probably isn't right
+        "generated_tokens": jnp.zeros((bsz, 1), dtype=jnp.int32),
         "tokens": next_token,
     }, result
 
 
-  @functools.partial(jax.jit, static_argnums=(0,1), donate_argnums=(2,))
+  @functools.partial(jax.jit, static_argnums=(0,1))
   def generate(
       self,
       params: Params,
@@ -386,10 +394,9 @@ class EntropixEngine:
 
     If sampler is passed, then the engine should use it do sample next token.
     """
-    cur_pos = decode_state['logits'].shape[1]
-    #stop = jnp.array([128001, 128008, 128009])
+    cur_pos = decode_state['next_pos']
     freqs_cis_slice = jax.lax.dynamic_slice(self.freqs_cis, (cur_pos, 0), (1, self.freqs_cis.shape[1]))
-    logits, kvcache, scores = self.xfmr_fn(self.xfmr_weights, params, decode_state['generated_tokens'], cur_pos, freqs_cis_slice, decode_state['cache'])
+    logits, kvcache, scores = self.xfmr_fn(self.xfmr_weights, params, decode_state["tokens"], cur_pos, freqs_cis_slice, decode_state['cache'])
     #new_token = self.sample_fn(logits, scores, cur_pos, key=rng)
     new_token = sample(logits)
     result = ResultTokens(
@@ -408,12 +415,12 @@ class EntropixEngine:
     return {
         "logits": logits,
         "cache": kvcache,
-        "next_pos": cur_pos + 1,
-        "generated_tokens": new_token,
+        "next_pos": decode_state["next_pos"] + 1,
+        "generated_tokens": decode_state["generated_tokens"] + 1,
         "tokens": new_token,
     }, result
 
-
+  @functools.partial(jax.jit,static_argnums=(0,),donate_argnums=(1,2,))
   def insert(
       self,
       prefix: Prefix,
