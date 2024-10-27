@@ -245,7 +245,7 @@ class EntropixEngine:
   @property
   def max_concurrent_decodes(self) -> int:
     """Total capacity."""
-    return 32 # TODO: make this configurable
+    return 1 # TODO: This should just be devices
 
   @property
   def samples_per_slot(self) -> int:

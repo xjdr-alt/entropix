@@ -33,11 +33,18 @@ async def run(ckpt_path: Path = Path('weights/1B-Instruct'), tokenizer_path: str
   tokenizer = Tokenizer(tokenizer_path)
   xfmr_fn = jax.jit(xfmr, static_argnames=("model_params",))
   sample_fn = jax.jit(sample)
+  num_engines = 1 # TODO(xjdr): this should probably be num devices as well
   driver = Driver(
-    prefill_engines=[EntropixEngine(model_params, xfmr_weights, tokenizer, xfmr_fn, sample_fn)],
-    generate_engines=[EntropixEngine(model_params, xfmr_weights, tokenizer, xfmr_fn, sample_fn)],
-    prefill_params=[model_params], # These should be engine specific params
-    generate_params=[model_params], # These should be engine specific params
+      prefill_engines=[
+          EntropixEngine(model_params, xfmr_weights, tokenizer, xfmr_fn, sample_fn)
+          for _ in range(num_engines)
+      ],
+      generate_engines=[
+          EntropixEngine(model_params, xfmr_weights, tokenizer, xfmr_fn, sample_fn)
+          for _ in range(num_engines)
+      ],
+      prefill_params=[model_params] * num_engines,
+      generate_params=[model_params] * num_engines,
   )
 
   orchestrator = EntropixOrchestrator(driver)
@@ -50,24 +57,27 @@ Today Date: 23 July 2024
 Think carefully in a step-by-step manner. which number is larger, 9.9 or 9.11?<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
 """
+
   #Think carefully in a step-by-step manner. Can you write a python agent that generates passwords with modern best practices?<|eot_id|><|start_header_id|>assistant<|end_header_id|>
   #Think carefully in a step-by-step manner. Oliver picks 44 kiwis on Friday. Then he picks 58 kiwis on Saturday. On Sunday, he picks double the number of kiwis he did on Friday, but five of them were a bit smaller than average. How many kiwis does Oliver have?<|eot_id|><|start_header_id|>assistant<|end_header_id|>
   #Think carefully in a step-by-step manner. which number is larger, 9.9 or 9.11?<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-  metadata = Metadata()
-  request = Request(tokens=prompt, max_tokens=4096, metadata=metadata)
-  g1 = orchestrator.decode(request)
-  g2 = orchestrator.decode(request)
-  g3 = orchestrator.decode(request)
-  g4 = orchestrator.decode(request)
-  async for decoded in g1:
-    print(f'LOOP 1: {decoded}')
-  async for decoded in g2:
-    print(f'LOOP 2: {decoded}')
-  async for decoded in g3:
-    print(f'LOOP 3: {decoded}')
-  async for decoded in g4:
-    print(f'LOOP 4: {decoded}')
 
+  # Create separate request instances but process them through the same engines
+  requests = [
+      Request(tokens=prompt, max_tokens=4096, metadata=Metadata())
+      for _ in range(4)
+  ]
+
+  # Process requests concurrently through the shared engines
+  generators = [orchestrator.decode(request) for request in requests]
+
+  async def process_generator(gen, loop_num):
+      async for decoded in gen:
+          print(f'LOOP {loop_num}: {decoded}')
+
+  await asyncio.gather(
+      *[process_generator(gen, i+1) for i, gen in enumerate(generators)]
+  )
 
 def main():
   asyncio.run(run())
