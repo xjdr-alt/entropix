@@ -34,7 +34,7 @@ fairscale = "^0.4.13"
 
 
 [tool.poetry.group.eval.dependencies]
-lm-eval = "^0.4.4"
+lm-eval = "^0.4.5"
 langdetect = "^1.0.9"
 immutabledict = "^4.2.0"
 

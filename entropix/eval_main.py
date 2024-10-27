@@ -15,7 +15,9 @@ from lm_eval.api.model import LM
 from lm_eval.api.task import Task
 from lm_eval.utils import make_table
 
-from entropix.config import LLAMA_1B_PARAMS
+from transformers import AutoTokenizer
+
+from entropix.config import LLAMA_1B_PARAMS, LLAMA_3B_PARAMS
 from entropix.kvcache import KVCache
 from entropix.model import xfmr
 from entropix.sampler import SamplerConfig, _sample, sample
@@ -72,10 +74,12 @@ def build_attn_mask(seqlen: int, start_pos: int) -> jax.Array:
 class CustomLLaMAModel(LM):
     def __init__(self, weights_path: Path):
         super().__init__()
-        self.model_params = LLAMA_1B_PARAMS
+        # self.model_params = LLAMA_1B_PARAMS
+        self.model_params = LLAMA_3B_PARAMS
         self.xfmr_weights = load_weights(weights_path.absolute())
         self.tokenizer = Tokenizer("entropix/tokenizer.model")
         self._tokenizer_name = "meta-llama/Llama-3.2-1B-Instruct"
+        self.hf_tokenizer = AutoTokenizer.from_pretrained(self._tokenizer_name)
         self.freqs_cis = precompute_freqs_cis(
             self.model_params.head_dim,
             self.model_params.max_seq_len,
@@ -83,6 +87,14 @@ class CustomLLaMAModel(LM):
             self.model_params.use_scaled_rope
         )
         self.sampler_cfg = SamplerConfig()
+
+    def apply_chat_template(self, chat_history: List[Dict[str, str]]) -> str:
+        """
+        Method to apply a chat template to a list of chat history between user and model.
+        """
+        return self.hf_tokenizer.apply_chat_template(
+            chat_history, tokenize=False, add_generation_prompt=True
+        )
 
     def _model_generate(self, context_tokens: List[int], max_tokens: int):
         gen_tokens = None
@@ -98,6 +110,7 @@ class CustomLLaMAModel(LM):
 
         cur_pos = seqlen
         stop = jnp.array([128001, 128008, 128009])
+        # stop = jnp.array([128001, 128008, 128009] + stop_tokens)
 
         while cur_pos < min(self.model_params.max_seq_len, len(context_tokens) + max_tokens):
             cur_pos += 1
@@ -112,21 +125,32 @@ class CustomLLaMAModel(LM):
 
     def generate_until(self, requests) -> List[str]:
         res = []
-        for request in requests:
+        # for request in requests:
+        for i, request in enumerate(requests):
             context = request.args[0]
-            until = request.args[1]
+            ## e.g. ['<|eot_id|>', '<|start_header_id|>user<|end_header_id|>', 'Q:', '</s>', '<|im_end|>']
+            stop_seqs = request.args[1]["until"]
+            ## e.g. [[128009], [128006, 882, 128007], [48, 25], [524, 82, 29], [27, 91, 318, 6345, 91, 29]]
+            ## some stop_seqs are comprised of multiple tokens
+            ## lm-eval uses multi token stop criteria, 
+            ## https://github.com/rasdani/lm-evaluation-harness/blob/9b052fdccae265d6cc422f463136d2da7c2541b2/lm_eval/models/utils.py#L254
+            # stop_tokens = [self.tokenizer.encode(stop_seq, bos=False, eos=False, allowed_special='all') for stop_seq in stop_seqs]
             context_tokens = self.tokenizer.encode(context, bos=False, eos=False, allowed_special='all')
             generated_tokens, _ = self._model_generate(context_tokens, self.max_gen_toks)
             _res = []
-            for t in generated_tokens:
-                _decoded = self.tokenizer.decode(t)
-                for stop_seq in until:
-                    if stop_seq in _decoded:
-                        stop_index = _decoded.index(stop_seq)
-                        _decoded = _decoded[:stop_index]
-                        break
-                _res.append(_decoded)
-            decoded = ''.join(_res)
+            # for t in generated_tokens:
+            #     _decoded = self.tokenizer.decode(t)
+            #     for stop_seq in stop_seqs:
+            #         if stop_seq in _decoded:
+            #             pass
+            #             stop_index = _decoded.index(stop_seq)
+            #             _decoded = _decoded[:stop_index]
+            #             break
+            #     _res.append(_decoded)
+            # decoded = ''.join(_res)
+            generated_tokens = [t.item() for t in generated_tokens]
+            decoded = self.tokenizer.decode(generated_tokens)
+            print(f"Sample Nr. {i}")
             print(decoded)
             res.append(decoded)
 
@@ -204,11 +228,14 @@ class CustomLLaMAModel(LM):
         self._tokenizer_name = value
 
 def main(
-    weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath('1B-Instruct'),
+    # weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath("1B-Instruct"),
+    weights_path: Path = DEFAULT_WEIGHTS_PATH.joinpath("3B-Instruct"),
     tasks: List[str] = ["gsm8k_cot_llama"],
-    # tasks: List[str] = ["gsm8k_cot"],
-    # tasks: List[str] = ["gsm8k"],
-    # tasks: List[str] = ["gsm8k_cot_zeroshot"],
+    # tasks: List[str] = ["mmlu"],
+    # tasks: List[str] = ["mmlu_stem", "mmlu_other", "mmlu_social_sciences", "mmlu_humanities"],
+    # tasks: List[str] = ["mmlu_stem_tasks", "mmlu_other_tasks", "mmlu_social_sciences_tasks", "mmlu_humanities_tasks"],
+    # tasks: List[str] = ["mmlu_stem_tasks"],
+    # tasks: List[str] = ["arc_easy"],
 ):
 
     tasks_dict: Dict[str, Task] = lm_eval.tasks.get_task_dict(tasks)
@@ -222,9 +249,10 @@ def main(
         # limit=1,
         # limit=2,
         # limit=5,
-        limit=10,
-        # apply_chat_template=True,
-        # fewshot_as_multiturn=True,
+        # limit=10,
+        limit=30,
+        apply_chat_template=True,
+        fewshot_as_multiturn=True,
     )
 
 
@@ -237,7 +265,10 @@ def main(
         json.dump(results, f)
 
 if __name__ == '__main__':
-    tyro.cli(main)
     import datetime
+    start_time = datetime.datetime.now() 
+    tyro.cli(main)
     current_time = datetime.datetime.now()
-    print(f"Current timestamp: {current_time}")
+    print(f"Start time: {start_time}")
+    print(f"Current time: {current_time}")
+    print(f"Total time taken: {current_time - start_time}")
