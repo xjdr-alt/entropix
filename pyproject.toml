@@ -7,9 +7,6 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.11"
-jax = {version = "^0.4.33", extras = ["cuda12"], markers = "platform_system != 'Darwin'"}
-jaxlib = {version = "^0.4.33", extras = ["cpu"], markers = "platform_system == 'Darwin'"}
-flax = "^0.9.0"
 tiktoken = "0.4.0"
 pydantic = "^2.9.2"
 blobfile = "^3.0.0"
@@ -18,7 +15,7 @@ rich = "^13.8.1"
 torch = {version = "^2.4.1", source = "pytorch", extras = ["+cu124"], optional = true, markers = "platform_system != 'Darwin'"}
 chex = "^0.1.87"
 tyro = "^0.8.11"
-
+jax = {extras = ["cuda12"], version = "^0.4.35"}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.2"
@@ -39,10 +36,13 @@ langdetect = "^1.0.9"
 immutabledict = "^4.2.0"
 
 
-[tool.poetry.group.engine.dependencies]
-uvicorn = "^0.32.0"
+
+[tool.poetry.group.server.dependencies]
+fastapi = "^0.115.3"
 pydantic = "^2.9.2"
-fastapi = "^0.115.2"
+uvicorn = "^0.32.0"
+openai = "^1.52.2"
+
 
 [[tool.poetry.source]]
 name = "pytorch"
