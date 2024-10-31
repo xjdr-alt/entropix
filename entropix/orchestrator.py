@@ -1,5 +1,3 @@
-from typing import Any, AsyncIterator, Optional, NamedTuple, Tuple, Union, cast,  Generic, TypeVar, List
-
 import asyncio
 import dataclasses
 import functools
@@ -12,16 +10,23 @@ import sys
 import threading
 import time
 import traceback
+from concurrent import futures
+from typing import (
+  Any,
+  Generic,
+  Optional,
+  Tuple,
+  TypeVar,
+  cast,
+)
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
-from concurrent import futures
 from entropix import token_utils
-from entropix.tokenizer import Tokenizer
 from entropix.engine import EntropixEngine, ResultTokens
-
+from entropix.tokenizer import Tokenizer
 
 V = TypeVar("V")
 
@@ -81,9 +86,7 @@ class AsyncMultifuture(Generic[V]):
     Args:
       exception: The exception to set.
     """
-    self._loop.call_soon_threadsafe(
-        self._queue.put_nowait, _Exception(exception)
-    )
+    self._loop.call_soon_threadsafe(self._queue.put_nowait, _Exception(exception))
     self._loop.call_soon_threadsafe(self._done.set)
 
   def add_result(self, result: V) -> None:
@@ -230,8 +233,9 @@ class ActiveRequest:
   generate_timestep_added: Optional[int] = None
   is_client_side_tokenization: Optional[bool] = False
   ################## Information relevant for metrics ###################
-  metadata: ActiveRequestMetadata = dataclasses.field(default_factory=ActiveRequestMetadata)
-
+  metadata: ActiveRequestMetadata = dataclasses.field(
+    default_factory=ActiveRequestMetadata
+  )
 
   def enqueue_samples(self, generated_samples: list[ReturnSample]):
     """Adds the generated sample(s) to return channel for current step.
@@ -257,7 +261,6 @@ class JetThread(threading.Thread):
       print(f"Thread {self.name} encountered an error: {e}")
       traceback.print_exc()
       os.kill(os.getpid(), signal.SIGKILL)
-
 
 
 class Driver:
@@ -294,16 +297,16 @@ class Driver:
   _jax_padding = True
 
   # All metrics we want to monitor should be collected with this
-  #_metrics_collector: JetstreamMetricsCollector | None = None
+  # _metrics_collector: JetstreamMetricsCollector | None = None
 
   def __init__(
-      self,
-      prefill_engines: Optional[list[EntropixEngine]] = None,
-      generate_engines: Optional[list[EntropixEngine]] = None,
-      prefill_params: Optional[list[Any]] = None,
-      generate_params: Optional[list[Any]] = None,
-      interleaved_mode: bool = False,
-      jax_padding: bool = True,
+    self,
+    prefill_engines: Optional[list[EntropixEngine]] = None,
+    generate_engines: Optional[list[EntropixEngine]] = None,
+    prefill_params: Optional[list[Any]] = None,
+    generate_params: Optional[list[Any]] = None,
+    interleaved_mode: bool = False,
+    jax_padding: bool = True,
   ):
     if prefill_engines is None:
       prefill_engines = []
@@ -315,22 +318,21 @@ class Driver:
       generate_params = []
 
     logging.info(
-        "Initialising driver with %d prefill engines and %d generate engines.",
-        len(prefill_engines),
-        len(generate_engines),
+      "Initialising driver with %d prefill engines and %d generate engines.",
+      len(prefill_engines),
+      len(generate_engines),
     )
     self._prefill_engines = prefill_engines
     self._generate_engines = generate_engines
     self._prefill_params = prefill_params
     self._generate_params = generate_params
     self._interleaved_mode = interleaved_mode
-    #self._metrics_collector = metrics_collector
+    # self._metrics_collector = metrics_collector
 
     # Stages 1-4 represent the life cycle of a request.
     # Stage 1
     # At first, a request is placed here in order to get prefilled.
     self._prefill_backlog = queue.Queue()
-
 
     # Stage 2
     # After prefilling, it is placed here in order to get transferred to
@@ -341,8 +343,8 @@ class Driver:
     # while 1 transfer is enqueued while 1 is being transferred.
     # TODO: Make queue size configurable.
     self._transfer_backlogs = [
-        queue.Queue(1 if self._interleaved_mode else 4)
-        for i in range(len(self._prefill_engines))
+      queue.Queue(1 if self._interleaved_mode else 4)
+      for i in range(len(self._prefill_engines))
     ]
 
     # Stage 3
@@ -354,10 +356,10 @@ class Driver:
     # minimizing the memory usage for disaggregated mode.
     # TODO: Make queue size configurable.
     self._generate_backlogs = {
-        idx: queue.Queue(
-            1 if self._interleaved_mode else engine.max_concurrent_decodes // 3
-        )
-        for idx, engine in enumerate(self._generate_engines)
+      idx: queue.Queue(
+        1 if self._interleaved_mode else engine.max_concurrent_decodes // 3
+      )
+      for idx, engine in enumerate(self._generate_engines)
     }
 
     # Stage 4
@@ -380,10 +382,10 @@ class Driver:
     # tokens are ready and it receives tokens from a different sequence,
     # or tokens detokenized before the relevant slot is live.
     self._detokenize_backlogs = [
-        # We don't let detokenization accumulate more than 8 steps to avoid
-        # synchronization issues.
-        queue.Queue(8)
-        for _ in self._generate_engines
+      # We don't let detokenization accumulate more than 8 steps to avoid
+      # synchronization issues.
+      queue.Queue(8)
+      for _ in self._generate_engines
     ]
 
     # A queue of integers representing available 'slots' in the decode
@@ -391,67 +393,63 @@ class Driver:
     # When we want to insert a prefill result, we pop an integer to insert at.
     # When this is empty, it means all slots are full.
     self._generate_slots = [
-        queue.Queue(engine.max_concurrent_decodes)
-        for engine in self._generate_engines
+      queue.Queue(engine.max_concurrent_decodes) for engine in self._generate_engines
     ]
     _ = [
-        [
-            self._generate_slots[idx].put(i)
-            for i in range(engine.max_concurrent_decodes)
-        ]
-        for idx, engine in enumerate(self._generate_engines)
+      [self._generate_slots[idx].put(i) for i in range(engine.max_concurrent_decodes)]
+      for idx, engine in enumerate(self._generate_engines)
     ]
 
     self._jax_padding = jax_padding
 
     # Create all threads
     self._prefill_threads = [
-        JetThread(
-            target=functools.partial(self._prefill_thread, idx),
-            name=f"prefill-{idx}",
-            daemon=True,
-        )
-        for idx in range(len(self._prefill_engines))
+      JetThread(
+        target=functools.partial(self._prefill_thread, idx),
+        name=f"prefill-{idx}",
+        daemon=True,
+      )
+      for idx in range(len(self._prefill_engines))
     ]
     self._transfer_threads = [
-        JetThread(
-            target=functools.partial(
-                self._transfer_thread,
-                idx,
-            ),
-            name=f"transfer-{idx}",
-            daemon=True,
-        )
-        for idx in range(len(self._prefill_engines))
+      JetThread(
+        target=functools.partial(
+          self._transfer_thread,
+          idx,
+        ),
+        name=f"transfer-{idx}",
+        daemon=True,
+      )
+      for idx in range(len(self._prefill_engines))
     ]
     self._generate_threads = [
-        JetThread(
-            target=functools.partial(
-                self._generate_thread,
-                idx,
-            ),
-            name=f"generate-{idx}",
-            daemon=True,
-        )
-        for idx in range(len(self._generate_engines))
+      JetThread(
+        target=functools.partial(
+          self._generate_thread,
+          idx,
+        ),
+        name=f"generate-{idx}",
+        daemon=True,
+      )
+      for idx in range(len(self._generate_engines))
     ]
     self.detokenize_threads = [
-        JetThread(
-            target=functools.partial(
-                self._detokenize_thread,
-                idx,
-            ),
-            name=f"detokenize-{idx}",
-        )
-        for idx in range(len(self._generate_engines))
+      JetThread(
+        target=functools.partial(
+          self._detokenize_thread,
+          idx,
+        ),
+        name=f"detokenize-{idx}",
+      )
+      for idx in range(len(self._generate_engines))
     ]
     self._all_threads = list(
-        itertools.chain(
-            self._prefill_threads,
-            self._transfer_threads,
-            self._generate_threads,
-            self.detokenize_threads,
-        )
+      itertools.chain(
+        self._prefill_threads,
+        self._transfer_threads,
+        self._generate_threads,
+        self.detokenize_threads,
+      )
     )
     self.live = True
     # self._is_ray_backend = is_ray_backend
@@ -465,12 +463,12 @@ class Driver:
     self.live = False
 
     all_backlogs = list(
-        itertools.chain(
-            [self._prefill_backlog],
-            self._transfer_backlogs,
-            self._generate_backlogs.values(),
-            self._detokenize_backlogs,
-        )
+      itertools.chain(
+        [self._prefill_backlog],
+        self._transfer_backlogs,
+        self._generate_backlogs.values(),
+        self._detokenize_backlogs,
+      )
     )
 
     while any(t.is_alive() for t in self._all_threads):
@@ -506,7 +504,7 @@ class Driver:
     # We don't support filling all backlogs at once because it can cause GIL
     # contention.
     total_max_concurrent_decodes = sum(
-        [e.max_concurrent_decodes for e in self._generate_engines]
+      [e.max_concurrent_decodes for e in self._generate_engines]
     )
     return total_max_concurrent_decodes
 
@@ -516,31 +514,31 @@ class Driver:
     self._prefill_backlog.put(request, block=False)
 
   def _process_prefill_content(
-      self,
-      request: ActiveRequest,
-      tokenizer: Tokenizer,
-      is_bos: bool,
-      max_prefill_length: int,
+    self,
+    request: ActiveRequest,
+    tokenizer: Tokenizer,
+    is_bos: bool,
+    max_prefill_length: int,
   ) -> Tuple[jax.Array | np.ndarray, int]:
     content = request.prefill_content
     if isinstance(content, str):
       # If it's text input, tokenize and pad the input.
       tokens = tokenizer.encode(
-          content,
-          bos=is_bos,
-          eos=False,
-          allowed_special='all',
+        content,
+        bos=is_bos,
+        eos=False,
+        allowed_special="all",
       )
       return jnp.array([tokens], dtype=jnp.int32), len(tokens)
     else:
       # If it's token input, pad the input.
       return token_utils.pad_tokens(
-          content,
-          tokenizer.bos_id,
-          tokenizer.pad_id,
-          is_bos=is_bos,
-          max_prefill_length=max_prefill_length,
-          jax_padding=self._jax_padding,
+        content,
+        tokenizer.bos_id,
+        tokenizer.pad_id,
+        is_bos=is_bos,
+        max_prefill_length=max_prefill_length,
+        jax_padding=self._jax_padding,
       )
 
   def _prefill_thread(self, idx: int):
@@ -562,22 +560,21 @@ class Driver:
       request.metadata.prefill_dequeue_time = time.perf_counter()
       is_bos = True
       logging.info(
-          "Prefilling on prefill engine %d : prefill queue size, %d,"
-          " is_bos: %s",
-          idx,
-          self._prefill_backlog.qsize(),
-          is_bos,
+        "Prefilling on prefill engine %d : prefill queue size, %d," " is_bos: %s",
+        idx,
+        self._prefill_backlog.qsize(),
+        is_bos,
       )
       # Tokenize and padding the text or token input.
       padded_tokens, true_length = self._process_prefill_content(
-          request, tokenizer, is_bos, prefill_engine.max_prefill_length
+        request, tokenizer, is_bos, prefill_engine.max_prefill_length
       )
 
       # Compute new kv cache for the prefill_content.
       prefill_result, first_token = prefill_engine.prefill(
-          params=prefill_params,
-          padded_tokens=padded_tokens,
-          true_length=true_length,
+        params=prefill_params,
+        padded_tokens=padded_tokens,
+        true_length=true_length,
       )
       request.prefill_result = prefill_result
 
@@ -586,40 +583,34 @@ class Driver:
       my_detokenize_backlog = self._detokenize_backlogs[idx]
       request.metadata.transfer_enqueue_time = time.perf_counter()
       my_detokenize_backlog.put(
-          (first_token, request, request.metadata.prefill_dequeue_time),
-          block=True,
+        (first_token, request, request.metadata.prefill_dequeue_time),
+        block=True,
       )
 
       # Once prefill is complete, place it on the generation queue and block if
       # full.
       my_transfer_backlog.put(request, block=True)
       logging.info(
-          "Placed request on transfer queue %d, %d queued requests.",
-          idx,
-          my_transfer_backlog.qsize(),
+        "Placed request on transfer queue %d, %d queued requests.",
+        idx,
+        my_transfer_backlog.qsize(),
       )
 
       del prefill_result
       del request
 
-  def _jax_transfer_prefill_result(
-      self, new_request: ActiveRequest, target_idx: int
-  ):
+  def _jax_transfer_prefill_result(self, new_request: ActiveRequest, target_idx: int):
     new_request.prefill_result = jax.device_put(
-        new_request.prefill_result,
-        self._generate_engines[target_idx].get_prefix_destination_sharding(),
+      new_request.prefill_result,
+      self._generate_engines[target_idx].get_prefix_destination_sharding(),
     )
     # Block here so we don't block on the generate thread that steps.
     jax.block_until_ready(new_request.prefill_result)
 
-  def _ray_transfer_prefill_result(
-      self, new_request: ActiveRequest, target_idx: int
-  ):
+  def _ray_transfer_prefill_result(self, new_request: ActiveRequest, target_idx: int):
     self._generate_engines[target_idx].transfer(new_request.prefill_result)
 
-  def _transfer_prefill_result(
-      self, new_request: ActiveRequest, target_idx: int
-  ):
+  def _transfer_prefill_result(self, new_request: ActiveRequest, target_idx: int):
     self._jax_transfer_prefill_result(new_request, target_idx)
 
   def _transfer_thread(self, idx: int):
@@ -633,17 +624,14 @@ class Driver:
       if new_request is None:
         break
       new_request.metadata.transfer_dequeue_time = time.perf_counter()
-      target_idx = min(
-          self._generate_backlogs.items(), key=lambda q: q[1].qsize()
-      )[0]
+      target_idx = min(self._generate_backlogs.items(), key=lambda q: q[1].qsize())[0]
       # Only transfer the KVCache for the disaggregated serving.
       # TODO: Remove the conditional after fixing the compatibility.
       if not self._interleaved_mode:
         logging.info(
-            "Transferring prefill from prefill engine %d "
-            "to generate engine %d.",
-            idx,
-            target_idx,
+          "Transferring prefill from prefill engine %d " "to generate engine %d.",
+          idx,
+          target_idx,
         )
         # Transfer the info to the relevant generate slice.
         self._transfer_prefill_result(new_request, target_idx)
@@ -651,12 +639,12 @@ class Driver:
       new_request.metadata.generate_enqueue_time = time.perf_counter()
       self._generate_backlogs[target_idx].put(new_request, block=True)
       logging.info(
-          "Successfully transferred prefill "
-          "from prefill engine %d to generate engine %d "
-          "(%d requests now in backlog).",
-          idx,
-          target_idx,
-          self._generate_backlogs[target_idx].qsize(),
+        "Successfully transferred prefill "
+        "from prefill engine %d to generate engine %d "
+        "(%d requests now in backlog).",
+        idx,
+        target_idx,
+        self._generate_backlogs[target_idx].qsize(),
       )
 
   def _generate_thread(self, idx: int):
@@ -679,16 +667,15 @@ class Driver:
     while self.live:
       if (time.time() - time_of_last_print) > 1:
         logging.info(
-            "Generate thread making a decision with:"
-            " prefill_backlog=%d"
-            " generate_free_slots=%d",
-            self._prefill_backlog.qsize(),
-            my_slots.qsize(),
+          "Generate thread making a decision with:"
+          " prefill_backlog=%d"
+          " generate_free_slots=%d",
+          self._prefill_backlog.qsize(),
+          my_slots.qsize(),
         )
         time_of_last_print = time.time()
 
       max_concurrent_decodes = generate_engine.max_concurrent_decodes
-
 
       # Check if there are any free my_slots. We don't want to block here since
       # we can still generate if we can't insert. We do this in a while loop to
@@ -734,37 +721,43 @@ class Driver:
           return
 
         logging.info(
-            "Generate slice %d filling slot %d at step %d.",
-            idx,
-            slot,
-            generate_timestep,
+          "Generate slice %d filling slot %d at step %d.",
+          idx,
+          slot,
+          generate_timestep,
         )
 
         decode_state = generate_engine.insert(
-            new_request.prefill_result, decode_state, slot=slot
+          new_request.prefill_result, decode_state, slot=slot
         )
         del new_request.prefill_result
         new_request.generate_timestep_added = generate_timestep
-        new_request.complete = np.zeros((generate_engine.samples_per_slot,), dtype=np.bool_)
+        new_request.complete = np.zeros(
+          (generate_engine.samples_per_slot,), dtype=np.bool_
+        )
         # Respond to detokenization backpressure.
         my_detokenize_backlog.put((slot, new_request), block=True)
 
       # At this point, we know that we have at least some slots filled.
-      assert (my_slots.qsize() < max_concurrent_decodes), "At this point we must have some requests inserted into the slots."
+      assert (
+        my_slots.qsize() < max_concurrent_decodes
+      ), "At this point we must have some requests inserted into the slots."
 
       # Now we actually take a generate step on requests in the slots.
-      decode_state, sampled_tokens = generate_engine.generate(generate_params, decode_state)
+      decode_state, sampled_tokens = generate_engine.generate(
+        generate_params, decode_state
+      )
       sampled_tokens.copy_to_host_async()
       # Respond to detokenization backpressure.
       my_detokenize_backlog.put((generate_timestep, sampled_tokens), block=True)
       generate_timestep += 1
       logging.info(
-          "Generate engine %d step %d - slots free : %d / %d, took %.2fms",
-          idx,
-          generate_timestep,
-          my_slots_size,
-          max_concurrent_decodes,
-          (time.time() - time_of_last_generate) * 10**3,
+        "Generate engine %d step %d - slots free : %d / %d, took %.2fms",
+        idx,
+        generate_timestep,
+        my_slots_size,
+        max_concurrent_decodes,
+        (time.time() - time_of_last_generate) * 10**3,
       )
       time_of_last_generate = time.time()
 
@@ -780,7 +773,7 @@ class Driver:
     metadata = my_generate_engine.get_tokenizer()
     tokenizer = my_generate_engine.build_tokenizer(metadata)
     my_live_requests = {
-        i: None for i in range(my_generate_engine.max_concurrent_decodes)
+      i: None for i in range(my_generate_engine.max_concurrent_decodes)
     }
     while self.live:
       data = my_detokenize_backlog.get(block=True)
@@ -793,12 +786,12 @@ class Driver:
         request_first_token = request_first_token.convert_to_numpy()
 
         results, complete = token_utils.process_result_tokens(
-            tokenizer=tokenizer,
-            slot=0,  # always 0 as prefill only run 1 sample
-            slot_max_length=request.max_tokens,
-            result_tokens=request_first_token,
-            is_client_side_tokenization=request.is_client_side_tokenization,
-            complete=request.complete,
+          tokenizer=tokenizer,
+          slot=0,  # always 0 as prefill only run 1 sample
+          slot_max_length=request.max_tokens,
+          result_tokens=request_first_token,
+          is_client_side_tokenization=request.is_client_side_tokenization,
+          complete=request.complete,
         )
         request.complete = complete
         # Return some output samples.
@@ -806,9 +799,8 @@ class Driver:
 
         first_token_return_time = time.perf_counter()
         logging.info(
-            "TTFT duration: %fms",
-            (first_token_return_time - request.metadata.prefill_dequeue_time)
-            * 1000,
+          "TTFT duration: %fms",
+          (first_token_return_time - request.metadata.prefill_dequeue_time) * 1000,
         )
       # generate step tokens
       elif isinstance(data[1], ResultTokens):
@@ -821,12 +813,12 @@ class Driver:
         for slot, request in my_live_requests.items():
           if request is not None:
             results, complete = token_utils.process_result_tokens(
-                tokenizer=tokenizer,
-                slot=slot,
-                slot_max_length=request.max_tokens,
-                result_tokens=result_tokens,
-                is_client_side_tokenization=request.is_client_side_tokenization,
-                complete=request.complete,
+              tokenizer=tokenizer,
+              slot=slot,
+              slot_max_length=request.max_tokens,
+              result_tokens=result_tokens,
+              is_client_side_tokenization=request.is_client_side_tokenization,
+              complete=request.complete,
             )
             request.complete = complete
             # Return some output samples.
@@ -839,9 +831,9 @@ class Driver:
               my_slots.put(slot, block=False)  # This should always have space.
               my_generate_engine.free_resource(slot)
         logging.info(
-            "Detokenizing generate step %d took %.2fms",
-            generate_timestep_added,
-            (time.time() - start_detokenize_time) * 10**3,
+          "Detokenizing generate step %d took %.2fms",
+          generate_timestep_added,
+          (time.time() - start_detokenize_time) * 10**3,
         )
       else:
         # We want to update a slot with the new channel.
@@ -867,16 +859,16 @@ class EntropixOrchestrator:
         return True
 
   def process_server_side_tokenization_response(
-      self, response: Any, buffered_response_list
+    self, response: Any, buffered_response_list
   ):
     # Flush the buffered responses to each sample of current response.
-    current_response_with_flushed_buffer = list(
-        zip(*buffered_response_list, response)
-    )
+    current_response_with_flushed_buffer = list(zip(*buffered_response_list, response))
     # Empty buffer: [[s0_cur], [s1_cur], ...]
     # Has buffer:
     # [[s0_b0, s0_b1, ..., s0_cur], [s1_b0, s1_b1, ..., s1_cur], ...]
-    current_response_with_flushed_buffer = cast(list[list[ReturnSample]], current_response_with_flushed_buffer)
+    current_response_with_flushed_buffer = cast(
+      list[list[ReturnSample]], current_response_with_flushed_buffer
+    )
     # Form correct sample(s) and return as StreamContent for this iteration.
     samples = []
     for sample in current_response_with_flushed_buffer:
@@ -891,14 +883,14 @@ class EntropixOrchestrator:
   async def decode(self, request):
     return_channel = AsyncMultifuture()
     active_request = ActiveRequest(
-        max_tokens=request.max_tokens,
-        prefill_content=request.tokens,
-        is_client_side_tokenization=request.is_client_side_tokenization,
-        return_channel=return_channel,
-        metadata=ActiveRequestMetadata(
-            start_time=request.metadata.start_time,
-            prefill_enqueue_time=time.perf_counter(),
-        ),
+      max_tokens=request.max_tokens,
+      prefill_content=request.tokens,
+      is_client_side_tokenization=request.is_client_side_tokenization,
+      return_channel=return_channel,
+      metadata=ActiveRequestMetadata(
+        start_time=request.metadata.start_time,
+        prefill_enqueue_time=time.perf_counter(),
+      ),
     )
     try:
       self._driver.place_request_on_prefill_queue(active_request)
@@ -923,6 +915,8 @@ class EntropixOrchestrator:
         # The client should take care of tokenization and detokenization.
         yield self.process_client_side_tokenization_response(response)
       else:
-        yield self.process_server_side_tokenization_response(response, buffered_response_list)
+        yield self.process_server_side_tokenization_response(
+          response, buffered_response_list
+        )
         # Reset buffer after flushed.
         buffered_response_list = []

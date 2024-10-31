@@ -12,7 +12,6 @@ pydantic = "^2.9.2"
 blobfile = "^3.0.0"
 ml-dtypes = "^0.5.0"
 rich = "^13.8.1"
-torch = {version = "^2.4.1", source = "pytorch", extras = ["+cu124"], optional = true, markers = "platform_system != 'Darwin'"}
 chex = "^0.1.87"
 tyro = "^0.8.11"
 jax = {extras = ["cuda12"], version = "^0.4.35"}
@@ -44,10 +43,6 @@ uvicorn = "^0.32.0"
 openai = "^1.52.2"
 
 
-[[tool.poetry.source]]
-name = "pytorch"
-url = "https://download.pytorch.org/whl/cu124"
-priority = "explicit"
 
 [build-system]
 requires = ["poetry-core"]
