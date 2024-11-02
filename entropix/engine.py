@@ -214,16 +214,19 @@ class EntropixEngine:
     self,
     params: Params,
     xfmr_weights: XfmrWeights,
+    mesh: jax.sharding.Mesh,
     tokenizer: Tokenizer,
     xfmr_fn: Callable,
     sample_fn: Callable,
   ):
     self.params = params
     self.xfmr_weights = xfmr_weights
+    self.mesh = mesh
+    self.replicated = jax.NamedSharding(mesh, jax.sharding.PartitionSpec())
     self.tokenizer = tokenizer
-    self.freqs_cis = self.precompute_freqs_cis(
+    self.freqs_cis = jax.device_put(self.precompute_freqs_cis(
       params.head_dim, params.max_seq_len, params.rope_theta, params.use_scaled_rope
-    )
+    ), self.replicated)
     self.xfmr_fn = xfmr_fn
     self.sample_fn = sample_fn
 
@@ -249,7 +252,7 @@ class EntropixEngine:
   @property
   def max_concurrent_decodes(self) -> int:
     """Total capacity."""
-    return 1  # TODO: This should just be devices
+    return jax.device_count()
 
   @property
   def samples_per_slot(self) -> int:
@@ -273,9 +276,9 @@ class EntropixEngine:
     """Maximum prefill length."""
     return 1024
 
-  @property
   def mesh(self) -> jax.sharding.Mesh:
     """Mesh which the engine is running on."""
+    return self.mesh
 
   @property
   def colocated_cpus(self) -> Union[list[CpuDevices], None]:
@@ -361,15 +364,16 @@ class EntropixEngine:
     kvcache = KVCache.new(
       params.n_layers, bsz, params.max_seq_len, params.n_local_kv_heads, params.head_dim
     )
-    logits, kvcache, _ = self.xfmr_fn(
-      self.xfmr_weights,
-      params,
-      padded_tokens,
-      cur_pos,
-      self.freqs_cis[:seqlen],
-      kvcache,
-      attn_mask=attn_mask,
-    )
+    with self.mesh:
+      logits, kvcache, _ = self.xfmr_fn(
+        self.xfmr_weights,
+        params,
+        padded_tokens,
+        cur_pos,
+        self.freqs_cis[:seqlen],
+        kvcache,
+        attn_mask=attn_mask,
+      )
     next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
     # Create arrays for tokens, validity, and lengths
     tokens = next_token
@@ -423,14 +427,15 @@ class EntropixEngine:
     freqs_cis_slice = jax.lax.dynamic_slice(
       self.freqs_cis, (cur_pos, 0), (1, self.freqs_cis.shape[1])
     )
-    logits, kvcache, scores = self.xfmr_fn(
-      self.xfmr_weights,
-      params,
-      decode_state["tokens"],
-      cur_pos,
-      freqs_cis_slice,
-      decode_state["cache"],
-    )
+    with self.mesh:
+      logits, kvcache, scores = self.xfmr_fn(
+        self.xfmr_weights,
+        params,
+        decode_state["tokens"],
+        cur_pos,
+        freqs_cis_slice,
+        decode_state["cache"],
+      )
 
     new_token = self.sample_fn(logits, scores)
     result = ResultTokens(

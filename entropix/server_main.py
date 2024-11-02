@@ -86,20 +86,19 @@ class ModelManager:
 
       logger.info("Initializing model...")
       model_params = LLAMA_1B_PARAMS
-      xfmr_weights = load_weights(ckpt_path, n_layers=model_params.n_layers)
+      xfmr_weights, mesh = load_weights(ckpt_path, model_params)
       self.tokenizer = Tokenizer(tokenizer_path)
-
       xfmr_fn = jax.jit(xfmr, static_argnames=("model_params",))
       #sample_fn = jax.jit(nucleus_sample)
       sample_fn = jax.jit(sample)
-      num_engines = 1
+      num_engines = jax.device_count()
       driver = Driver(
         prefill_engines=[
-          EntropixEngine(model_params, xfmr_weights, self.tokenizer, xfmr_fn, sample_fn)
+          EntropixEngine(model_params, xfmr_weights, mesh, self.tokenizer, xfmr_fn, sample_fn)
           for _ in range(num_engines)
         ],
         generate_engines=[
-          EntropixEngine(model_params, xfmr_weights, self.tokenizer, xfmr_fn, sample_fn)
+          EntropixEngine(model_params, xfmr_weights, mesh, self.tokenizer, xfmr_fn, sample_fn)
           for _ in range(num_engines)
         ],
         prefill_params=[model_params] * num_engines,
