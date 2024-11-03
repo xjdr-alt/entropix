@@ -255,7 +255,7 @@ DEFAULT_DS_CONFIG = DSConfig(
   # Dirichlet parameters
   perturb_base_coeff=0.95,
   perturb_exp_coeff=2.5,
-  dirichlet_support=jnp.arange(50257),  # this is gpt2 vocab size
+  dirichlet_support=jnp.arange(128256),  # this is llama3 vocab size
   # Threshold parameters
   outlier_threshold=OutlierThreshold(
     bilinear=jnp.eye(4) * 0.15,  # Increased sensitivity
@@ -280,5 +280,5 @@ DEFAULT_DS_CONFIG = DSConfig(
     bias=0.1,  # Added small positive bias
   ),
   # Token outlier parameters
-  outlier_topk=3,
+  outlier_topk=5,
 )
