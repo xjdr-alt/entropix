@@ -20,12 +20,22 @@ def test_streaming():
   )
 
   full_response = ""
-  for chunk in stream:
-    if chunk.choices[0].delta.content is not None:
-      content = chunk.choices[0].delta.content
-      print(content, end="", flush=True)
-      full_response += content
+  choices = {}
+  try:
+    for chunk in stream:
+      for choice in chunk.choices:
+        if choice.delta.content is not None:
+          content = choice.delta.content
+          #print(content, end="", flush=True)
+          if choice.index not in choices:
+            choices[choice.index] = ""
+          choices[choice.index] += content
+          full_response += content
+  except Exception as e:
+    print(f"Error during testing: {str(e)}")
   print("\n")
+  for k,v in choices.items():
+    print(f"Choice {k}: {v}")
 
   #stream = client.chat.completions.create(
   #  model="entropix-1b",

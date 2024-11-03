@@ -140,8 +140,8 @@ class ModelManager:
     request = ModelRequest(tokens=prompt, max_tokens=max_tokens, metadata=Metadata())
 
     async for token_data in self.orchestrator.decode(request):
-      # token_data is [(str, [token])]
-      yield token_data[0]  # Yield the first tuple from the list
+      # token_data: [(' compare', [9616]), ("'s", [596]), (' is', [374]), (' ', [220]), (',', [11])]
+      yield token_data  # Yield the first tuple from the list
 
 
 app = FastAPI(title="Entropix Model Server")
@@ -157,38 +157,55 @@ app.add_middleware(
 
 
 async def stream_response(request: ChatCompletionRequest) -> AsyncGenerator[str, None]:
-  request_id = f"chatcmpl-{uuid.uuid4()}"
-  created = int(time.time())
+    request_id = f"chatcmpl-{uuid.uuid4()}"
+    created = int(time.time())
 
-  # Send the initial response
-  yield f"data: {json.dumps({'id': request_id, 'object': 'chat.completion.chunk', 'created': created, 'model': request.model, 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
+    # Send the initial response with role only
+    yield f"data: {json.dumps({'id': request_id, 'object': 'chat.completion.chunk', 'created': created, 'model': request.model, 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
 
-  prompt = generate_chat_prompt(request)
-  accumulated_text = ""
+    prompt = generate_chat_prompt(request)
+    accumulated_text = ""
 
-  try:
-    async for token_tuple in model_manager.generate_response(
-      prompt, request.max_tokens
-    ):
-      text, _ = token_tuple  # Unpack the tuple
-      accumulated_text += text
+    try:
+        async for token_batch in model_manager.generate_response(prompt, request.max_tokens):
+            # Create a chunk with multiple choices, one for each response in the batch
+            chunk = {
+                "id": request_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": request.model,
+                "choices": [
+                    {
+                        "index": idx,
+                        "delta": {"content": text},
+                        "finish_reason": None
+                    }
+                    for idx, (text, _) in enumerate(token_batch)
+                ]
+            }
+            yield f"data: {json.dumps(chunk)}\n\n"
 
-      chunk = {
-        "id": request_id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": request.model,
-        "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
-      }
-      yield f"data: {json.dumps(chunk)}\n\n"
+        # Send the final chunk
+        final_chunk = {
+            "id": request_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": request.model,
+            "choices": [
+                {
+                    "index": idx,
+                    "delta": {},
+                    "finish_reason": "stop"
+                }
+                for idx in range(len(token_batch))  # Use the same number of choices as the last batch
+            ]
+        }
+        yield f"data: {json.dumps(final_chunk)}\n\n"
+        yield "data: [DONE]\n\n"
 
-    # Send the final chunk
-    yield f"data: {json.dumps({'id': request_id, 'object': 'chat.completion.chunk', 'created': created, 'model': request.model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
-    yield "data: [DONE]\n\n"
-
-  except Exception as e:
-    logger.error(f"Error generating response: {e!s}")
-    raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error generating response: {e!s}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/v1/chat/completions")

@@ -224,9 +224,12 @@ class EntropixEngine:
     self.mesh = mesh
     self.replicated = jax.NamedSharding(mesh, jax.sharding.PartitionSpec())
     self.tokenizer = tokenizer
-    self.freqs_cis = jax.device_put(self.precompute_freqs_cis(
-      params.head_dim, params.max_seq_len, params.rope_theta, params.use_scaled_rope
-    ), self.replicated)
+    self.freqs_cis = jax.device_put(
+      self.precompute_freqs_cis(
+        params.head_dim, params.max_seq_len, params.rope_theta, params.use_scaled_rope
+      ),
+      self.replicated,
+    )
     self.xfmr_fn = xfmr_fn
     self.sample_fn = sample_fn
 
@@ -257,7 +260,7 @@ class EntropixEngine:
   @property
   def samples_per_slot(self) -> int:
     """Total samples per slot."""
-    return 1
+    return 1 # this is actually top_k
 
   def free_resource(
     self,
@@ -337,7 +340,6 @@ class EntropixEngine:
       mask = jnp.hstack([jnp.zeros((seqlen, start_pos)), mask], dtype=jnp.float32)
     return mask
 
-
   @functools.partial(jax.jit, static_argnames=("self", "params"))
   def prefill(
     self,
@@ -348,6 +350,7 @@ class EntropixEngine:
     true_length: int,
     sampler: Optional[Callable[[Any], Any]] = None,  # pylint: disable=unused-argument
     rng: Optional[jax.random.PRNGKey] = None,
+    top_k: int = 6,
   ) -> Tuple[Prefix, ResultTokens]:
     """Computes a kv-cache for a set of tokens conditional on existing cache.
 
@@ -374,12 +377,19 @@ class EntropixEngine:
         kvcache,
         attn_mask=attn_mask,
       )
-    next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
+    # next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
+    _, next_token = jax.lax.top_k(logits[:, -1], k=top_k)
+    next_token = jnp.array(next_token, dtype=jnp.int32).reshape((top_k, 1))
     # Create arrays for tokens, validity, and lengths
-    tokens = next_token
-    validity = jnp.ones_like(next_token, dtype=jnp.bool_)
-    lengths = jnp.array([[true_length + 1]], dtype=jnp.int32)  # +1 for the new token
-    # Concatenate all data into a single array
+    tokens = next_token  # shape: (top_k, 1)
+    validity = jnp.ones_like(next_token, dtype=jnp.bool_)  # shape: (top_k, 1)
+    # Broadcast lengths to match batch dimension
+    lengths = jnp.broadcast_to(
+        jnp.array([[true_length + 1]], dtype=jnp.int32),
+        (top_k, 1)
+    )  # shape: (top_k, 1)
+
+    # Now all arrays have shape (top_k, 1) and can be concatenated
     data = jnp.concatenate([tokens, validity, lengths], axis=1)
     result = ResultTokens(
       data=data,
@@ -391,7 +401,7 @@ class EntropixEngine:
       valid_idx=(1, 2),
       # And lengths is rank 1.
       length_idx=(2, 3),
-      samples_per_slot=1,
+      samples_per_slot=bsz,
     )
 
     return {
@@ -401,6 +411,7 @@ class EntropixEngine:
       "generated_tokens": jnp.zeros((bsz, 1), dtype=jnp.int32),
       "tokens": next_token,
     }, result
+
 
   @functools.partial(jax.jit, static_argnums=(0, 1))
   def generate(
@@ -424,6 +435,7 @@ class EntropixEngine:
     If sampler is passed, then the engine should use it do sample next token.
     """
     cur_pos = decode_state["next_pos"]
+    bsz = decode_state["tokens"].shape[0]
     freqs_cis_slice = jax.lax.dynamic_slice(
       self.freqs_cis, (cur_pos, 0), (1, self.freqs_cis.shape[1])
     )
@@ -436,14 +448,27 @@ class EntropixEngine:
         freqs_cis_slice,
         decode_state["cache"],
       )
-
-    new_token = self.sample_fn(logits, scores)
+    new_token, metrics = jax.vmap(lambda logit, score: self.sample_fn(logit[None, :], score[None, :]), in_axes=(0, 0))(logits, scores)
+    new_token = new_token.reshape((bsz, 1))
+    """
+  metrics =  {
+    "logits_entropy": entropy,
+    "logits_varentropy": varentropy,
+    "attn_entropy": attn_entropy,
+    "attn_varentropy": attn_varentropy,
+  }
+    """
+    # TODO(xjdr):
+    #   - valid tokens should be set based on a min varent value
+    #   - we should sorting the top_k by entropy and varentropy values
     result = ResultTokens(
       data=jnp.concatenate(
         (
           new_token,
           jnp.ones_like(new_token, dtype=jnp.bool_),
-          decode_state["generated_tokens"],
+          jnp.full(
+            (bsz, 1), decode_state["generated_tokens"][:, -1] + 1, dtype=jnp.int32
+          ),
         ),
         axis=1,
       ),
@@ -455,7 +480,7 @@ class EntropixEngine:
       valid_idx=(1, 2),
       # And lengths is rank 1.
       length_idx=(2, 3),
-      samples_per_slot=1,
+      samples_per_slot=bsz,
     )
 
     return {
@@ -464,7 +489,9 @@ class EntropixEngine:
       "next_pos": decode_state["next_pos"] + 1,
       "generated_tokens": decode_state["generated_tokens"] + 1,
       "tokens": new_token,
+      "metrics": metrics,
     }, result
+
 
   @functools.partial(
     jax.jit,
@@ -492,9 +519,15 @@ class EntropixEngine:
     and batch), but at the engine interface level all of these are exposed as
     a [0, n) range of slots and converted internally.
     """
+    bsz = prefix["tokens"].shape[0]
+    layers, _, max_seq_len, kv_heads, head_dim = prefix["cache"].k.shape
+    new_k = jnp.broadcast_to(prefix["cache"].k, (layers, bsz, max_seq_len, kv_heads, head_dim))
+    new_v = jnp.broadcast_to(prefix["cache"].v, (layers, bsz, max_seq_len, kv_heads, head_dim))
+    new_cache = KVCache(k=new_k, v=new_v)
+
     return {
       "logits": prefix["logits"],
-      "cache": prefix["cache"],
+      "cache": new_cache,
       "next_pos": prefix["next_pos"],
       "generated_tokens": prefix["generated_tokens"],
       "tokens": prefix["tokens"],

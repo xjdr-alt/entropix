@@ -144,8 +144,8 @@ def _sample(
 
 
 def calculate_metrics(
-  logits: jnp.ndarray, attention_scores: jnp.ndarray
-) -> Dict[str, jnp.ndarray]:
+  logits: jax.Array, attention_scores: jax.Array
+) -> Dict[str, jax.Array]:
   entropy, varentropy = calculate_varentropy_logsoftmax(logits)
   attention_probs = jax.nn.softmax(attention_scores, axis=-1)
   attn_entropy = -jnp.sum(
@@ -166,7 +166,7 @@ def sample(
   attention_scores: jax.Array,
   clarifying_question_token: int = 2564,
   key=jax.random.PRNGKey(1337),
-) -> jax.Array:
+) -> Tuple[jax.Array, Dict[str, jax.Array]]:
   cfg = SamplerConfig()
   metrics = calculate_metrics(logits, attention_scores)
   ent, vent = metrics["logits_entropy"], metrics["logits_varentropy"]
@@ -313,4 +313,4 @@ def sample(
     best_sample_idx = jnp.argmax(sample_scores)
     return jnp.array(samples)[best_sample_idx]
 
-  return jax.lax.switch(case, (lelv, helv, lehv, hehv, adaptive_sampling))
+  return jax.lax.switch(case, (lelv, helv, lehv, hehv, adaptive_sampling)), metrics
