@@ -68,7 +68,7 @@ class ArgmaxThreshold:
   def tree_flatten(self):
     """For JAX pytree handling"""
     aux_data = {"weight": self.weight, "bias": self.bias}
-    return [], aux_data  # No arrays, just auxiliary data
+    return [], aux_data 
 
   @classmethod
   def tree_unflatten(cls, aux_data, arrays):
@@ -87,7 +87,7 @@ class DirichletThreshold:
   def tree_flatten(self):
     """For JAX pytree handling"""
     aux_data = {"weight": self.weight, "bias": self.bias}
-    return [], aux_data  # No arrays, just auxiliary data
+    return [], aux_data  
 
   @classmethod
   def tree_unflatten(cls, aux_data, arrays):
@@ -150,7 +150,14 @@ class DSConfig:
   # Dirichlet parameters
   perturb_base_coeff: float
   perturb_exp_coeff: float
-  dirichlet_support: jnp.ndarray
+  """
+  dirichlet_support is a subset of the vocabulary of your model.
+  recommended tuning:
+  1. sample autoregressively conditioned on random hidden state prompts
+  2. take the empirical average of logprobs across position and prompts
+  3. the support is all logprobs lying above the noise threshold (see normalize_logits in dslider.py)
+  """
+  dirichlet_support: jnp.ndarray 
 
   # Threshold parameters
   outlier_threshold: OutlierThreshold
@@ -167,15 +174,12 @@ class DSConfig:
     for field in self.__dataclass_fields__.values():
       value = getattr(self, field.name)
       if isinstance(value, (jnp.ndarray, jax.Array)):
-        # Only hash shape and dtype for arrays
         hashable_items.append(hash((str(field.name), value.shape, str(value.dtype))))
       elif isinstance(
         value, (OutlierThreshold, ArgmaxThreshold, DirichletThreshold, TargetEntropy)
       ):
-        # Use the class's hash method
         hashable_items.append(hash(value))
       else:
-        # For primitive types
         hashable_items.append(hash((str(field.name), value)))
     return hash(tuple(hashable_items))
 
@@ -255,29 +259,29 @@ DEFAULT_DS_CONFIG = DSConfig(
   # Dirichlet parameters
   perturb_base_coeff=0.95,
   perturb_exp_coeff=2.5,
-  dirichlet_support=jnp.arange(128256),  # this is llama3 vocab size
+  dirichlet_support=jnp.arange(128256),  
   # Threshold parameters
   outlier_threshold=OutlierThreshold(
-    bilinear=jnp.eye(4) * 0.15,  # Increased sensitivity
+    bilinear=jnp.eye(4) * 0.15,  
     linear_state_ent=jnp.ones(4) * 0.15,
     linear_state_std=jnp.ones(4) * 0.15,
     linear_naked_ent=0.15,
     linear_naked_std=0.15,
     linear_naked_varent=0.15,
-    bias=0.1,  # Added small positive bias
+    bias=0.1, 
   ),
   argmax_threshold=ArgmaxThreshold(
-    weight=1.2,  # Increased from 1.0
-    bias=0.1,  # Added small positive bias
+    weight=1.2, 
+    bias=0.1, 
   ),
   dirichlet_threshold=DirichletThreshold(
-    weight=1.2,  # Increased from 1.0
-    bias=0.1,  # Added small positive bias
+    weight=1.2,  
+    bias=0.1,  
   ),
   target_entropy=TargetEntropy(
     linear=jnp.ones(4) * 0.15,
-    linear_inv_temp=jnp.ones(1) * 1.2,  # Increased from 1.0
-    bias=0.1,  # Added small positive bias
+    linear_inv_temp=jnp.ones(1) * 1.2,  
+    bias=0.1,  
   ),
   # Token outlier parameters
   outlier_topk=5,

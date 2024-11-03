@@ -15,29 +15,24 @@ def kl_divergence(logp: jnp.ndarray, logq: jnp.ndarray) -> jnp.ndarray:
   p = jnp.exp(logp)
   return jnp.sum(jnp.where(p > 0, p * (logp - logq), 0.0), axis=-1)
 
-
 @jax.jit
 def ent_varent(logp: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
-  """Compute entropy and variance from log probabilities."""
+  """Compute entropy and varentropy from log probabilities."""
   p = jnp.exp(logp)
   ent = -jnp.sum(p * logp, axis=-1)
-  diff = logp + ent[:, None]  # broadcasting
+  diff = logp + ent[:, None] 
   varent = jnp.sum(p * diff**2, axis=-1)
   return ent, varent
 
 @jax.jit
 def normalize_logits(logits: jnp.ndarray, vsz) -> jnp.ndarray:
-  """Normalize logits to log probabilities with numerical stability."""
-  shifted  = logits - jnp.max(logits, axis=-1, keepdims=True)
-  normalized = shifted - jax.nn.logsumexp(shifted, axis=-1, keepdims=True)
-  # noise floor calculated relative bfloat16
+  """Normalize logits to log probabilities with noise floor truncation."""
+  normalized  = logits - jax.nn.logsumexp(logits, axis=-1, keepdims=True) 
+  # noise floor calculated for bfloat16
   noise_floor = jnp.log(vsz)/2 - 7*jax.ln(2)
   return jnp.where(normalized < noise_floor, jnp.log(EPS), normalized)
 
-
 class DSState(NamedTuple):
-  """State maintained by the Adaptive Dirichlet Sampler"""
-
   emwa_dir: jnp.ndarray
   emwa_logp_dir_supp: jnp.ndarray
   emwa_temp: jnp.ndarray
@@ -52,12 +47,10 @@ class DSState(NamedTuple):
   emwa_dir_ent: jnp.ndarray
   emwa_topk_ent_naked: jnp.ndarray
 
-
 @partial(jax.jit, static_argnames=("bsz", "vsz", "config", "dtype"))
 def initialize_state(
   bsz: int, vsz: int, config: DSConfig, dtype=jnp.bfloat16
 ) -> DSState:
-  """Initialize the DSState with specified dtype."""
   state = DSState(
     emwa_dir=jnp.ones((bsz, config.dirichlet_support.size), dtype=dtype),
     emwa_logp_dir_supp=jnp.zeros((bsz, config.dirichlet_support.size), dtype=dtype),
@@ -84,7 +77,6 @@ def adaptive_dirichlet_step(
   config: DSConfig,
   wild: bool = True,
 ) -> Tuple[DSState, jnp.ndarray]:
-  """Single step of the Adaptive Dirichlet Sampler."""
   dtype = logits.dtype
   bsz, vsz = logits.shape
   output_tokens = jnp.zeros(bsz, dtype=jnp.int32)
@@ -174,22 +166,22 @@ def adaptive_dirichlet_step(
     config.emwa_temp_coeff * temp + (1 - config.emwa_temp_coeff) * state.emwa_temp
   )
   """
-    tune temperature and update emwa logp on dirichlet support
-    """
+  tune temperature and update emwa logp on dirichlet support
+  """
   # scale log probabilities
   tuned_logprobs = normalize_logits(
     naked_log_probs / jnp.clip(temp[:, None], MIN_TEMP, MAX_TEMP)
   )
   """
-    update emwa logp and dirichlet parameters
-    """
+  update emwa logp and dirichlet parameters
+  """
   dir_support_logp = normalize_logits(tuned_logprobs[:, config.dirichlet_support])
   new_emwa_dir, new_emwa_logp_dir_sup = update_dirichlet_params(
     dir_support_logp, state, config
   )
   """
-    update Dirichlet entropy
-    """
+  update Dirichlet entropy
+  """
   dir_log_likelihood = dirichlet_log_likelihood_from_logprob(
     dir_support_logp, state.emwa_dir
   )
@@ -203,8 +195,8 @@ def adaptive_dirichlet_step(
   )
   use_dirichlet = outlier_mask & (-dir_log_likelihood < dirichlet_threshold)
   """
-    below dirichlet threshold, interpolate and sample (can improve this in the future)
-    """
+  below dirichlet threshold, interpolate and sample (can improve this in the future)
+  """
   # compute perturbation coefficient
   dir_expectation = dirichlet_expectation(state.emwa_dir)
   kl_div = dirichlet_expected_entropy(state.emwa_dir) - jnp.sum(
@@ -286,8 +278,6 @@ def adaptive_dirichlet_step(
     scaffold_token_logprob,
   )
 
-
-
 @partial(jax.jit, static_argnames=("config",))
 def compute_outlier_threshold(state_ent, state_std, naked_ent, naked_varent, config):
   return (
@@ -298,7 +288,6 @@ def compute_outlier_threshold(state_ent, state_std, naked_ent, naked_varent, con
     + naked_varent * config.outlier_threshold.linear_naked_varent
     + config.outlier_threshold.bias
   )
-
 
 @partial(jax.jit, static_argnames=("config",))
 def update_dirichlet_params(dir_support_logp, state, config):
