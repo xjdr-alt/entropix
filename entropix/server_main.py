@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from entropix.engine import LLAMA_1B_PARAMS, EntropixEngine
 from entropix.model import xfmr
+from entropix.dslider import adaptive_dirichlet_step
 from entropix.orchestrator import Driver, EntropixOrchestrator
 from entropix.sampler import nucleus_sample, sample
 from entropix.tokenizer import Tokenizer
@@ -90,7 +91,8 @@ class ModelManager:
       self.tokenizer = Tokenizer(tokenizer_path)
       xfmr_fn = jax.jit(xfmr, static_argnames=("model_params",))
       #sample_fn = jax.jit(nucleus_sample)
-      sample_fn = jax.jit(sample)
+      #sample_fn = jax.jit(sample)
+      sample_fn = jax.jit(adaptive_dirichlet_step)
       num_engines = jax.device_count()
       driver = Driver(
         prefill_engines=[

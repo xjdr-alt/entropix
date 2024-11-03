@@ -8,6 +8,8 @@ import numpy as np
 from jax.sharding import PartitionSpec as PS
 
 from entropix.kvcache import KVCache
+from entropix.dslider import initialize_state
+from entropix.dslider_config import DEFAULT_DS_CONFIG
 from entropix.tokenizer import Tokenizer
 
 """Defines the JetStream API.
@@ -419,7 +421,7 @@ class EntropixEngine:
     params: Params,
     decode_state: DecodeState,
     sampler: Optional[Callable[[Any], Any]] = None,  # pylint: disable=unused-argument
-    rng: Optional[jax.random.PRNGKey] = None,
+    rng: Optional[jax.random.PRNGKey] = jax.random.PRNGKey(1337),
   ) -> Tuple[DecodeState, ResultTokens]:
     """Generates tokens for each sequence being decoded in parallel.
 
@@ -440,7 +442,7 @@ class EntropixEngine:
       self.freqs_cis, (cur_pos, 0), (1, self.freqs_cis.shape[1])
     )
     with self.mesh:
-      logits, kvcache, scores = self.xfmr_fn(
+      logits, kvcache, _ = self.xfmr_fn(
         self.xfmr_weights,
         params,
         decode_state["tokens"],
@@ -448,16 +450,11 @@ class EntropixEngine:
         freqs_cis_slice,
         decode_state["cache"],
       )
-    new_token, metrics = jax.vmap(lambda logit, score: self.sample_fn(logit[None, :], score[None, :]), in_axes=(0, 0))(logits, scores)
+    #new_token, metrics = jax.vmap(lambda logit, score: self.sample_fn(logit[None, :], score[None, :]), in_axes=(0, 0))(logits, scores)
+    #new_state, new_token, *_ = jax.vmap(lambda logit: self.sample_fn(rng, decode_state["dslider_state"], logit[None, -1], DEFAULT_DS_CONFIG), in_axes=(0))(logits)
+    new_state, new_token, *_ = self.sample_fn(rng, decode_state["dslider_state"], logits[:, -1, :], DEFAULT_DS_CONFIG)
     new_token = new_token.reshape((bsz, 1))
-    """
-  metrics =  {
-    "logits_entropy": entropy,
-    "logits_varentropy": varentropy,
-    "attn_entropy": attn_entropy,
-    "attn_varentropy": attn_varentropy,
-  }
-    """
+
     # TODO(xjdr):
     #   - valid tokens should be set based on a min varent value
     #   - we should sorting the top_k by entropy and varentropy values
@@ -489,7 +486,7 @@ class EntropixEngine:
       "next_pos": decode_state["next_pos"] + 1,
       "generated_tokens": decode_state["generated_tokens"] + 1,
       "tokens": new_token,
-      "metrics": metrics,
+      "dslider_state": new_state,
     }, result
 
 
@@ -531,4 +528,5 @@ class EntropixEngine:
       "next_pos": prefix["next_pos"],
       "generated_tokens": prefix["generated_tokens"],
       "tokens": prefix["tokens"],
+      "dslider_state": initialize_state(bsz, prefix["logits"].shape[-1], DEFAULT_DS_CONFIG),
     }
