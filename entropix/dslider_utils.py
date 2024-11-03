@@ -8,9 +8,7 @@ import jax.scipy.special as jsp
 @jax.jit
 def halley_update(alpha, target_values):
   """
-  Compute the Halley's method update direction.
-  Supports batched inputs with batch dimension at axis 0.
-  EXACTLY mirrors the non-batch version.
+  Compute the Halley's method update direction for the function 
   """
   p1 = jsp.polygamma(1, alpha)
   p2 = jsp.polygamma(2, alpha)
@@ -48,8 +46,7 @@ def fit_dirichlet(
   dtype: jnp.dtype = jnp.bfloat16,
 ):
   """
-  Estimate Dirichlet parameters (alpha) from target logprobs.
-  EXACTLY mirrors the non-batch version.
+  Estimates Dirichlet parameters (alpha) from target logprobs.
   """
   batch_shape = target_values.shape[:-1]
   n = target_values.shape[-1]

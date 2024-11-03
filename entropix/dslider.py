@@ -25,19 +25,14 @@ def ent_varent(logp: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
   varent = jnp.sum(p * diff**2, axis=-1)
   return ent, varent
 
-
 @jax.jit
-def dirichlet_expectation(alpha: jnp.ndarray) -> jnp.ndarray:
-  """Compute the expectation E[X|X~Dir(alpha)]"""
-  alpha_sum = jnp.sum(alpha, axis=-1, keepdims=True)
-  return alpha / alpha_sum
-
-
-@jax.jit
-def sample_dirichlet(key: jax.random.PRNGKey, alpha: jnp.ndarray) -> jnp.ndarray:
-  """Sample from a Dirichlet distribution."""
-  gamma_samples = jax.random.gamma(key, alpha, shape=alpha.shape)
-  return gamma_samples / jnp.sum(gamma_samples, axis=-1, keepdims=True)
+def normalize_logits(logits: jnp.ndarray, vsz) -> jnp.ndarray:
+  """Normalize logits to log probabilities with numerical stability."""
+  shifted  = logits - jnp.max(logits, axis=-1, keepdims=True)
+  normalized = shifted - jax.nn.logsumexp(shifted, axis=-1, keepdims=True)
+  # noise floor calculated relative bfloat16
+  noise_floor = jnp.log(vsz)/2 - 7*jax.ln(2)
+  return jnp.where(normalized < noise_floor, jnp.log(EPS), normalized)
 
 
 class DSState(NamedTuple):
@@ -56,71 +51,6 @@ class DSState(NamedTuple):
   token_cross_var_naked: jnp.ndarray
   emwa_dir_ent: jnp.ndarray
   emwa_topk_ent_naked: jnp.ndarray
-
-
-@jax.jit
-def dirichlet_expectation(alpha: jnp.ndarray) -> jnp.ndarray:
-  """Compute the expectation E[X|X~Dir(alpha)]"""
-  alpha_sum = jnp.sum(alpha, axis=-1, keepdims=True)
-  return alpha / alpha_sum
-
-
-@jax.jit
-def dirichlet_expected_entropy(alpha: jnp.ndarray) -> jnp.ndarray:
-  """Compute the expected entropy of a Dirichlet distribution."""
-  alpha_sum = jnp.sum(alpha, axis=-1, keepdims=True)  # alpha_0
-  K = alpha.shape[-1]
-
-  # ln B(alpha) term
-  log_beta = jnp.sum(jsp.special.gammaln(alpha), axis=-1) - jsp.special.gammaln(
-    alpha_sum.squeeze()
-  )
-
-  # (alpha_0 - K)ψ(alpha_0) term
-  digamma_sum = jsp.special.digamma(alpha_sum)
-  second_term = (alpha_sum.squeeze() - K) * digamma_sum.squeeze()
-
-  # -sum((alpha_j - 1)ψ(alpha_j)) term
-  digamma_alpha = jsp.special.digamma(alpha)
-  third_term = -jnp.sum((alpha - 1) * digamma_alpha, axis=-1)
-
-  return log_beta + second_term + third_term
-
-
-@jax.jit
-def dirichlet_log_likelihood_from_logprob(
-  logprobs: jnp.ndarray, alpha: jnp.ndarray
-) -> jnp.ndarray:
-  """Compute log probability of probs under Dirichlet(alpha)."""
-  return (
-    jnp.sum((alpha - 1.0) * logprobs, axis=-1)
-    - jsp.special.gammaln(jnp.sum(alpha, axis=-1))
-    + jnp.sum(jsp.special.gammaln(alpha), axis=-1)
-  )
-
-
-@jax.jit
-def dirichlet_expected_varentropy(alpha: jnp.ndarray) -> jnp.ndarray:
-  """Compute the expected varentropy E[∑ᵢ ln(Xᵢ)² * Xᵢ] of a Dirichlet distribution.
-
-  Args:
-      alpha: Dirichlet parameters of shape (..., K)
-
-  Returns:
-      Expected varentropy of shape (...)
-  """
-  alpha_sum = jnp.sum(alpha, axis=-1, keepdims=True)  # α₀
-
-  # E[Xᵢ] = αᵢ/α₀
-  expected_x = alpha / alpha_sum
-
-  # ψ(αᵢ)² + ψ₁(αᵢ) term
-  digamma_alpha = jsp.special.digamma(alpha)
-  trigamma_alpha = jsp.special.polygamma(1, alpha)
-  squared_plus_deriv = digamma_alpha**2 + trigamma_alpha
-
-  # Sum over dimensions: ∑ᵢ (αᵢ/α₀) * (ψ₁(αᵢ) + ψ(αᵢ)²)
-  return jnp.sum(expected_x * squared_plus_deriv, axis=-1)
 
 
 @partial(jax.jit, static_argnames=("bsz", "vsz", "config", "dtype"))
@@ -156,12 +86,10 @@ def adaptive_dirichlet_step(
 ) -> Tuple[DSState, jnp.ndarray]:
   """Single step of the Adaptive Dirichlet Sampler."""
   dtype = logits.dtype
-  bsz, _ = logits.shape
+  bsz, vsz = logits.shape
   output_tokens = jnp.zeros(bsz, dtype=jnp.int32)
-  # Constants cast to dtype
   EPS = jnp.array(1e-8, dtype=dtype)
-  # normalize logits
-  naked_log_probs = normalize_logits(logits)
+  naked_log_probs = normalize_logits(logits, vsz)
   # update naked entropy rate
   naked_ent, naked_varent = ent_varent(naked_log_probs)
   new_emwa_ent_naked = (
@@ -180,7 +108,7 @@ def adaptive_dirichlet_step(
       state.emwa_ent_scaffold,
       state.emwa_ent_naked,
     ]
-  ).T  # TODO: add dirichlet expected entropy...
+  ).T  # TODO(doomslide): add dirichlet expected entropy...
   state_std = jnp.sqrt(
     jnp.array(
       [
@@ -190,14 +118,13 @@ def adaptive_dirichlet_step(
         state.emwa_varent_naked,
       ]
     )
-  ).T  # TODO: add dirichlet expected std...
+  ).T  # TODO(doomslide): add dirichlet expected std...
   outlier_threshold = compute_outlier_threshold(
     state_ent, state_std, naked_ent, naked_varent, config
   )
   outlier_mask = outlier_threshold > 0
-  # extract topk
-  topk_logits, topk_indices = jax.lax.top_k(naked_log_probs, config.outlier_topk)
   # update emwa topk entropy
+  topk_logits, topk_indices = jax.lax.top_k(naked_log_probs, config.outlier_topk)
   topk_logprobs = normalize_logits(topk_logits)
   naked_topk_ent, _ = ent_varent(topk_logprobs)
   new_emwa_topk_ent_naked = (
@@ -205,26 +132,23 @@ def adaptive_dirichlet_step(
     + (1 - config.emwa_topk_ent_naked_coeff) * state.emwa_topk_ent_naked
   )
   """
-    argmax policy for concentrated inliers
-    """
+  argmax policy for concentrated inliers
+  """
   argmax_threshold = (
     config.argmax_threshold.weight * state.emwa_topk_ent_naked
     + config.argmax_threshold.bias
   )
   argmax_mask = ~outlier_mask & (naked_topk_ent < argmax_threshold)
-  # Get indices of maximum probabilities within top-k
   argmax_indices = jnp.argmax(topk_logprobs, axis=-1)
-  # Map these indices back to the original token space using topk_indices
   argmax_tokens = jnp.take_along_axis(
     topk_indices, argmax_indices[:, None], axis=1
   ).squeeze(1)
-  # Only use these tokens where argmax_mask is True
   output_tokens = jnp.where(argmax_mask, argmax_tokens, output_tokens)
   """
-    topk temperature tuning policy for dispersed inliers
-    """
+  topk temperature tuning policy for dispersed inliers
+  """
   inlier_sampling_indices = ~outlier_mask & ~argmax_mask
-  # Handle less confident inliers by sampling with entropy-tuned temperature
+  # handle less confident inliers by sampling with entropy-tuned temperature
   inlier_sampling_temp, _, _ = temp_tune(topk_logprobs, state.emwa_topk_ent_naked)
   sampling_inlier_choices = jax.random.categorical(
     key, topk_logprobs / inlier_sampling_temp[:, None]
@@ -236,8 +160,8 @@ def adaptive_dirichlet_step(
     inlier_sampling_indices, sampling_inlier_tokens, output_tokens
   )
   """
-    target entropy = affine function of state_ent and inverse emwa temperature
-    """
+  target entropy = affine function of state_ent and inverse emwa temperature
+  """
   # outlier target entropy is affine function of state_ent and inverse emwa temperature
   target_entropy = (
     jnp.dot(state_ent, config.target_entropy.linear)
@@ -289,30 +213,29 @@ def adaptive_dirichlet_step(
   perturb_coeff = 1 - jnp.pow(
     config.perturb_base_coeff, -config.perturb_exp_coeff * (1 / (kl_div + EPS))
   )
-  # Calculate interpolated probabilities for the support tokens
-  interpolated_probs = perturb_coeff[:, None] * dir_expectation + (
+  # interpolate between model prediction and dirichlet expectation
+  slided_probs = perturb_coeff[:, None] * dir_expectation + (
     1 - perturb_coeff[:, None]
   ) * jnp.exp(dir_support_logp)
-  # For use_dirichlet case: sample from support space then map back
-  interpolated_choices = jnp.argmax(interpolated_probs, axis=-1)
-  dirichlet_tokens = jnp.take(config.dirichlet_support, interpolated_choices)
+  # in use_dirichlet case take argmax of the slided probs
+  dicihlet_choices = jnp.argmax(slided_probs, axis=-1)
+  dirichlet_tokens = jnp.take(config.dirichlet_support, dicihlet_choices)
   output_tokens = jnp.where(use_dirichlet, dirichlet_tokens, output_tokens)
   """
-    above dirichlet threshold youre ngmi
-    """
+  above dirichlet threshold youre ngmi
+  """
   if wild:
-    # sample from random dirichlet distributed
+    # sample p ~ Dirichlet(new_emwa_dir)
     sampled_probs = sample_dirichlet(key, new_emwa_dir)
     ood_choices = jax.random.categorical(key, jnp.log(sampled_probs + EPS))
     ood_tokens = jnp.take(config.dirichlet_support, ood_choices)
   else:
-    # sample from the pure tuned logprobs
+    # sample from the temperature tuned logprobs
     support_choices = jax.random.categorical(key, tuned_logprobs)
     ood_tokens = jnp.take(config.dirichlet_support, support_choices)
-  # Update output tokens where appropriate
   output_tokens = jnp.where(outlier_mask & ~use_dirichlet, ood_tokens, output_tokens)
   # update scaffold entropy rate
-  scaffold_ent, scaffold_varent = ent_varent(jnp.log(interpolated_probs + EPS))
+  scaffold_ent, scaffold_varent = ent_varent(jnp.log(slided_probs + EPS))
   new_emwa_ent_scaffold = (
     config.emwa_ent_scaffold_coeff * scaffold_ent
     + (1 - config.emwa_ent_scaffold_coeff) * state.emwa_ent_scaffold
@@ -324,7 +247,7 @@ def adaptive_dirichlet_step(
   # update token cross entropies
   batch_indices = jnp.arange(bsz)
   scaffold_token_logprob = jnp.log(
-    interpolated_probs[batch_indices, output_tokens] + EPS
+    slided_probs[batch_indices, output_tokens] + EPS
   )
   naked_token_logprob = jnp.log(naked_log_probs[batch_indices, output_tokens] + EPS)
   (
@@ -364,12 +287,31 @@ def adaptive_dirichlet_step(
   )
 
 
-@jax.jit
-def normalize_logits(logits: jnp.ndarray) -> jnp.ndarray:
-  """Normalize logits to log probabilities with numerical stability."""
-  shifted = logits - jnp.max(logits, axis=-1, keepdims=True)
-  return shifted - jax.nn.logsumexp(shifted, axis=-1, keepdims=True)
 
+@partial(jax.jit, static_argnames=("config",))
+def compute_outlier_threshold(state_ent, state_std, naked_ent, naked_varent, config):
+  return (
+    jnp.einsum("bi,ij,bj->b", state_ent, config.outlier_threshold.bilinear, state_std)
+    + jnp.einsum("bi,i->b", state_ent, config.outlier_threshold.linear_state_ent)
+    + jnp.einsum("bi,i->b", state_std, config.outlier_threshold.linear_state_std)
+    + naked_ent * config.outlier_threshold.linear_naked_ent
+    + naked_varent * config.outlier_threshold.linear_naked_varent
+    + config.outlier_threshold.bias
+  )
+
+
+@partial(jax.jit, static_argnames=("config",))
+def update_dirichlet_params(dir_support_logp, state, config):
+  kl = kl_divergence(dir_support_logp, state.emwa_logp_dir_supp)
+  emwa_logp_coeff = (
+    config.emwa_logp_base ** (-config.emwa_logp_exp_factor / (kl + EPS))
+  )[:, None]
+  new_emwa_logp_dir_sup = (
+    emwa_logp_coeff * dir_support_logp
+    + (1 - emwa_logp_coeff) * state.emwa_logp_dir_supp
+  )
+  new_dir_params, _, _ = fit_dirichlet(new_emwa_logp_dir_sup)
+  return new_dir_params, new_emwa_logp_dir_sup
 
 @jax.jit
 def update_token_cross_entropies(
@@ -404,28 +346,94 @@ def update_token_cross_entropies(
     token_cross_var_naked,
   )
 
+@jax.jit
+def sample_dirichlet(key: jax.random.PRNGKey, alpha: jnp.ndarray) -> jnp.ndarray:
+  """Sample from a Dirichlet distribution."""
+  gamma_samples = jax.random.gamma(key, alpha, shape=alpha.shape)
+  return gamma_samples / jnp.sum(gamma_samples, axis=-1, keepdims=True)
 
-@partial(jax.jit, static_argnames=("config",))
-def compute_outlier_threshold(state_ent, state_std, naked_ent, naked_varent, config):
+@jax.jit
+def dirichlet_log_likelihood_from_logprob(
+  logprobs: jnp.ndarray, alpha: jnp.ndarray
+) -> jnp.ndarray:
+  """
+  Computes Dirichlet log likelihood: 
+  
+  log Dir(p|α) = ln Γ(α₀) - ∑ᵢln Γ(αᵢ) + ∑ᵢ(αᵢ-1)ln(pᵢ)
+  
+  where:
+  - α₀ = ∑ᵢαᵢ is the sum of all parameters
+  - Γ(x) is the gamma function
+  - pᵢ are probabilities (passed as logprobs)
+  """
   return (
-    jnp.einsum("bi,ij,bj->b", state_ent, config.outlier_threshold.bilinear, state_std)
-    + jnp.einsum("bi,i->b", state_ent, config.outlier_threshold.linear_state_ent)
-    + jnp.einsum("bi,i->b", state_std, config.outlier_threshold.linear_state_std)
-    + naked_ent * config.outlier_threshold.linear_naked_ent
-    + naked_varent * config.outlier_threshold.linear_naked_varent
-    + config.outlier_threshold.bias
+    jnp.sum((alpha - 1.0) * logprobs, axis=-1)
+    - jsp.special.gammaln(jnp.sum(alpha, axis=-1))
+    + jnp.sum(jsp.special.gammaln(alpha), axis=-1)
   )
 
+@jax.jit
+def dirichlet_expectation(alpha: jnp.ndarray) -> jnp.ndarray:
+  """
+  Computes the expectation of p ~ Dir(α):
+  
+  E[p] = αᵢ/∑ⱼαⱼ
+  
+  where:
+  - αᵢ is the i-th parameter
+  - ∑ⱼαⱼ is the sum of all parameters
+  """
+  alpha_sum = jnp.sum(alpha, axis=-1, keepdims=True)
+  return alpha / alpha_sum
 
-@partial(jax.jit, static_argnames=("config",))
-def update_dirichlet_params(dir_support_logp, state, config):
-  kl = kl_divergence(dir_support_logp, state.emwa_logp_dir_supp)
-  emwa_logp_coeff = (
-    config.emwa_logp_base ** (-config.emwa_logp_exp_factor / (kl + EPS))
-  )[:, None]
-  new_emwa_logp_dir_sup = (
-    emwa_logp_coeff * dir_support_logp
-    + (1 - emwa_logp_coeff) * state.emwa_logp_dir_supp
+@jax.jit
+def dirichlet_expected_entropy(alpha: jnp.ndarray) -> jnp.ndarray:
+  """
+  Computes the expected entropy of p ~ Dir(α):
+
+  E[H(p)] = ln B(α) + (α₀ - K)ψ(α₀) - ∑ⱼ(αⱼ - 1)ψ(αⱼ)
+  
+  where:
+  - B(α) is the multivariate beta function
+  - K is the dimension
+  - ψ(x) is the digamma function
+  """
+  alpha_sum = jnp.sum(alpha, axis=-1, keepdims=True)  # alpha_0
+  K = alpha.shape[-1]
+  # ln B(α) term
+  log_beta = jnp.sum(jsp.special.gammaln(alpha), axis=-1) - jsp.special.gammaln(
+    alpha_sum.squeeze()
   )
-  new_dir_params, _, _ = fit_dirichlet(new_emwa_logp_dir_sup)
-  return new_dir_params, new_emwa_logp_dir_sup
+
+  # (α₀ - K)ψ(α₀) term
+  digamma_sum = jsp.special.digamma(alpha_sum)
+  second_term = (alpha_sum.squeeze() - K) * digamma_sum.squeeze()
+
+  # -sum((αⱼ - 1)ψ(αⱼ)) term
+  digamma_alpha = jsp.special.digamma(alpha)
+  third_term = -jnp.sum((alpha - 1) * digamma_alpha, axis=-1)
+
+  return log_beta + second_term + third_term
+
+
+@jax.jit
+def dirichlet_expected_varentropy(alpha: jnp.ndarray) -> jnp.ndarray:
+  """Compute the expected varentropy of p ~ Dir(α):
+   
+  E[∑ᵢ ln(pᵢ)² * pᵢ] = ∑ᵢ (αᵢ/α₀) * (ψ(αᵢ)² + ψ₁(αᵢ))
+
+  where:
+  - α₀ = ∑ᵢαᵢ is the sum of all parameters
+  - ψ(x) is the digamma function
+  - ψ₁(x) is the trigamma function (first derivative of digamma)
+  """
+  alpha_sum = jnp.sum(alpha, axis=-1, keepdims=True)  # α₀
+  # E[Xᵢ] = αᵢ/α₀
+  expected_x = alpha / alpha_sum
+  # ψ(αᵢ)² + ψ₁(αᵢ) term
+  digamma_alpha = jsp.special.digamma(alpha)
+  trigamma_alpha = jsp.special.polygamma(1, alpha)
+  squared_plus_deriv = digamma_alpha**2 + trigamma_alpha
+  # ∑ᵢ (αᵢ/α₀) * (ψ₁(αᵢ) + ψ(αᵢ)²)
+  return jnp.sum(expected_x * squared_plus_deriv, axis=-1)
+
