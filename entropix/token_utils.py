@@ -1,9 +1,9 @@
 """Token manipulation utilities."""
 
-from bisect import bisect_left
-import logging
-from typing import Any, Iterable, List, Optional, Tuple, Union
 import dataclasses
+import logging
+from bisect import bisect_left
+from typing import Iterable, List, Optional, Tuple, Union
 
 import jax
 import jax.numpy as jnp
@@ -11,8 +11,26 @@ import numpy as np
 
 from entropix.tokenizer import Tokenizer
 
+
 # ResultToken class to store tokens ids.
-ResultTokens = Any
+class ResultTokens:
+  """Stores and manages token data for model outputs.
+
+  Attributes:
+      data: Array containing tokens, validity flags, and sequence lengths
+      tokens_idx: Index range for token data
+      valid_idx: Index range for validity flags
+      length_idx: Index range for sequence lengths
+      samples_per_slot: Number of samples per processing slot
+  """
+
+  def __init__(self, data, tokens_idx, valid_idx, length_idx, samples_per_slot):
+    self.data = data
+    self.tokens_idx = tokens_idx
+    self.valid_idx = valid_idx
+    self.length_idx = length_idx
+    self.samples_per_slot = samples_per_slot
+
 
 @dataclasses.dataclass
 class ReturnSample:
@@ -28,18 +46,18 @@ class ReturnSample:
 
 
 DEFAULT_PREFILL_BUCKETS = [
-    16,
-    32,
-    64,
-    128,
-    256,
-    512,
-    1024,
-    2048,
-    4096,
-    8192,
-    16384,
-    32768,
+  16,
+  32,
+  64,
+  128,
+  256,
+  512,
+  1024,
+  2048,
+  4096,
+  8192,
+  16384,
+  32768,
 ]
 
 
@@ -52,12 +70,12 @@ def take_nearest_length(lengths: list[int], length: int) -> int:
 
 
 def tokenize_and_pad(
-    s: str,
-    vocab,
-    is_bos: bool = True,
-    prefill_lengths: Optional[List[int]] = None,
-    max_prefill_length: Optional[int] = None,
-    jax_padding: bool = True,
+  s: str,
+  vocab,
+  is_bos: bool = True,
+  prefill_lengths: Optional[List[int]] = None,
+  max_prefill_length: Optional[int] = None,
+  jax_padding: bool = True,
 ) -> Tuple[Union[jax.Array, np.ndarray], int]:
   """Tokenize and pads a string.
 
@@ -81,25 +99,25 @@ def tokenize_and_pad(
   assert pad_id == 0, "Further logic required if pad_id not 0."
 
   padded_tokens, true_length = pad_tokens(
-      tokens=tokens,
-      bos_id=bos_id,
-      pad_id=pad_id,
-      is_bos=is_bos,
-      prefill_lengths=prefill_lengths,
-      max_prefill_length=max_prefill_length,
-      jax_padding=jax_padding,
+    tokens=tokens,
+    bos_id=bos_id,
+    pad_id=pad_id,
+    is_bos=is_bos,
+    prefill_lengths=prefill_lengths,
+    max_prefill_length=max_prefill_length,
+    jax_padding=jax_padding,
   )
   return padded_tokens, true_length
 
 
 def pad_tokens(
-    tokens: np.ndarray,
-    bos_id: int,
-    pad_id: int,
-    is_bos: bool = True,
-    prefill_lengths: Optional[List[int]] = None,
-    max_prefill_length: Optional[int] = None,
-    jax_padding: bool = True,
+  tokens: np.ndarray,
+  bos_id: int,
+  pad_id: int,
+  is_bos: bool = True,
+  prefill_lengths: Optional[List[int]] = None,
+  max_prefill_length: Optional[int] = None,
+  jax_padding: bool = True,
 ) -> Tuple[Union[jax.Array, np.ndarray], int]:
   """Pads tokens to the nearest prefill length that is equal to or greater
      than the token length.
@@ -120,10 +138,12 @@ def pad_tokens(
   if prefill_lengths is None:
     prefill_lengths = DEFAULT_PREFILL_BUCKETS
   if max_prefill_length is not None:
-    prefill_lengths = prefill_lengths[:prefill_lengths.index(max_prefill_length)] + [max_prefill_length]
+    prefill_lengths = prefill_lengths[: prefill_lengths.index(max_prefill_length)] + [
+      max_prefill_length
+    ]
   # Add a beginning of sequence token if this is the beginning.
   if is_bos:
-    tokens = np.concatenate([np.array([bos_id]),tokens],axis=-1)
+    tokens = np.concatenate([np.array([bos_id]), tokens], axis=-1)
   true_length = tokens.shape[-1]
   padded_length = take_nearest_length(prefill_lengths, true_length)
   padding = padded_length - true_length
@@ -134,18 +154,18 @@ def pad_tokens(
   else:
     padded_tokens = np.pad(tokens, (0, padding), constant_values=(pad_id,))
   if jax_padding:
-    padded_tokens = jnp.array(padded_tokens)
+    padded_tokens = jnp.array([padded_tokens])
   return padded_tokens, true_length
 
 
 def process_result_tokens(
-    tokenizer: Tokenizer,
-    slot: int,
-    slot_max_length: int,
-    result_tokens: ResultTokens,
-    complete: np.ndarray,
-    is_client_side_tokenization: bool = False,
-    debug: bool = False,
+  tokenizer: Tokenizer,
+  slot: int,
+  slot_max_length: int,
+  result_tokens: ResultTokens,
+  complete: np.ndarray,
+  is_client_side_tokenization: bool = False,
+  debug: bool = False,
 ) -> Tuple[List[ReturnSample], np.ndarray]:
   """Processes a result tokens into a list of strings, handling multiple
     samples.
@@ -174,10 +194,10 @@ def process_result_tokens(
   complete = complete | (slot_lengths > slot_max_length)
   if debug:
     logging.info(
-        "Complete %s, slot_tokens: %s, slot_lengths: %s",
-        str(complete),
-        str(slot_tokens),
-        str(slot_lengths),
+      "Complete %s, slot_tokens: %s, slot_lengths: %s",
+      str(complete),
+      str(slot_tokens),
+      str(slot_lengths),
     )
   return_samples = []
   for idx in range(samples):
@@ -189,10 +209,10 @@ def process_result_tokens(
         valid = slot_valid[idx, spec_idx].item()
         if debug:
           logging.info(
-              "Sample idx: %d Speculation idx: %d Token: %d",
-              idx,
-              spec_idx,
-              tok_id,
+            "Sample idx: %d Speculation idx: %d Token: %d",
+            idx,
+            spec_idx,
+            tok_id,
           )
         if tok_id in stop_tokens or not valid:
           complete[idx] = True
@@ -202,9 +222,7 @@ def process_result_tokens(
           if not is_client_side_tokenization:
             text_so_far.append(tokenizer.decode([tok_id]))
           tok_id_so_far.append(tok_id)
-    return_samples.append(
-        ReturnSample(text=text_so_far, token_ids=tok_id_so_far)
-    )
+    return_samples.append(ReturnSample(text=text_so_far, token_ids=tok_id_so_far))
     if debug:
       logging.info("Return samples %s", str(return_samples))
   return return_samples, complete
@@ -230,7 +248,3 @@ def text_tokens_to_str(text_tokens: Iterable[str]) -> str:
     else:
       bytes_so_far.append(bytes(text_token, "utf-8"))
   return b"".join(bytes_so_far).decode("utf-8", "replace")
-
-
-
-

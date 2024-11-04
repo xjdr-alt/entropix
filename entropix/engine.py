@@ -7,9 +7,10 @@ import jax.numpy as jnp
 import numpy as np
 from jax.sharding import PartitionSpec as PS
 
-from entropix.kvcache import KVCache
+from entropix.config import ModelParams
 from entropix.dslider import initialize_state
 from entropix.dslider_config import DEFAULT_DS_CONFIG
+from entropix.kvcache import KVCache
 from entropix.tokenizer import Tokenizer
 
 """Defines the JetStream API.
@@ -17,7 +18,6 @@ from entropix.tokenizer import Tokenizer
 These functions are the accelerator functions which an outer sampling loop
 could want to call, enabling interleaved (continuous batching) inference.
 """
-
 
 # The model parameters - their partitioning will be unique for different prefill
 # and decode topoologies.
@@ -50,20 +50,6 @@ class XfmrWeights(NamedTuple):
   layer_weights: List[LayerWeights]
 
 
-class ModelParams(NamedTuple):
-  dim: int
-  n_layers: int
-  n_heads: int
-  n_kv_heads: int
-  vocab_size: int
-  ffn_dim_multiplier: float
-  multiple_of: int
-  norm_eps: float
-  rope_theta: float
-  use_scaled_rope: bool
-  max_seq_len: int
-
-
 class Params(NamedTuple):
   n_layers: int
   n_local_heads: int
@@ -72,52 +58,6 @@ class Params(NamedTuple):
   max_seq_len: int
   rope_theta: float
   use_scaled_rope: bool
-
-
-def create_llama_params(params: Dict[str, Any]) -> Params:
-  return Params(
-    n_layers=params["n_layers"],
-    n_local_heads=params["n_heads"],
-    n_local_kv_heads=params["n_kv_heads"],
-    head_dim=params["dim"] // params["n_heads"],
-    max_seq_len=params["max_seq_len"],
-    rope_theta=params["rope_theta"],
-    use_scaled_rope=params["use_scaled_rope"],
-  )
-
-
-# Model configurations
-MODEL_1B = ModelParams(
-  dim=2048,
-  n_layers=16,
-  n_heads=32,
-  n_kv_heads=8,
-  vocab_size=128256,
-  ffn_dim_multiplier=1.5,
-  multiple_of=256,
-  norm_eps=1e-05,
-  rope_theta=500000.0,
-  use_scaled_rope=True,
-  max_seq_len=4096,
-)
-
-MODEL_70B = ModelParams(
-  dim=8192,
-  n_layers=80,
-  n_heads=64,
-  n_kv_heads=8,
-  vocab_size=128256,
-  ffn_dim_multiplier=1.5,
-  multiple_of=256,
-  norm_eps=1e-05,
-  rope_theta=500000.0,
-  use_scaled_rope=True,
-  max_seq_len=4096,
-)
-
-# Create LLaMA parameters
-LLAMA_1B_PARAMS = create_llama_params(MODEL_1B._asdict())
-LLAMA_70B_PARAMS = create_llama_params(MODEL_70B._asdict())
 
 
 def create_partition_spec(key):
@@ -212,15 +152,30 @@ class ResultTokens(NamedTuple):
 
 
 class EntropixEngine:
+  """Main engine for running inference with transformer models.
+
+  Handles tokenization, model execution, and result processing.
+  """
+
   def __init__(
     self,
-    params: Params,
+    params: ModelParams,
     xfmr_weights: XfmrWeights,
     mesh: jax.sharding.Mesh,
     tokenizer: Tokenizer,
     xfmr_fn: Callable,
     sample_fn: Callable,
   ):
+    """Initialize engine with model parameters and functions.
+
+    Args:
+        params: Model architecture parameters
+        xfmr_weights: Model weights
+        mesh: Device mesh for parallel execution
+        tokenizer: Tokenizer instance
+        xfmr_fn: Transformer forward function
+        sample_fn: Token sampling function
+    """
     self.params = params
     self.xfmr_weights = xfmr_weights
     self.mesh = mesh
@@ -256,13 +211,13 @@ class EntropixEngine:
 
   @property
   def max_concurrent_decodes(self) -> int:
-    """Total capacity."""
+    """Maximum number of concurrent decode operations supported."""
     return jax.device_count()
 
   @property
   def samples_per_slot(self) -> int:
     """Total samples per slot."""
-    return 1 # this is actually top_k
+    return 1  # this is actually top_k
 
   def free_resource(
     self,
@@ -318,7 +273,7 @@ class EntropixEngine:
 
     return jax.vmap(scale_freq)(freqs)
 
-  # @functools.partial(jax.jit, static_argnums=(0,1))
+  # @functools.partial(jax.jit, static_argnums=(0, 1))
   def precompute_freqs_cis(
     self,
     dim: int,
@@ -380,18 +335,14 @@ class EntropixEngine:
         attn_mask=attn_mask,
       )
     # next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
-    _, next_token = jax.lax.top_k(logits[:, -1], k=top_k)
+    _, next_token = jax.lax.top_k(logits[:, true_length], k=top_k)
     next_token = jnp.array(next_token, dtype=jnp.int32).reshape((top_k, 1))
     # Create arrays for tokens, validity, and lengths
-    tokens = next_token  # shape: (top_k, 1)
-    validity = jnp.ones_like(next_token, dtype=jnp.bool_)  # shape: (top_k, 1)
-    # Broadcast lengths to match batch dimension
+    tokens = next_token
+    validity = jnp.ones_like(next_token, dtype=jnp.bool_)
     lengths = jnp.broadcast_to(
-        jnp.array([[true_length + 1]], dtype=jnp.int32),
-        (top_k, 1)
-    )  # shape: (top_k, 1)
-
-    # Now all arrays have shape (top_k, 1) and can be concatenated
+      jnp.array([[true_length + 1]], dtype=jnp.int32), (tokens.shape[0], 1)
+    )
     data = jnp.concatenate([tokens, validity, lengths], axis=1)
     result = ResultTokens(
       data=data,
@@ -409,11 +360,10 @@ class EntropixEngine:
     return {
       "logits": logits,
       "cache": kvcache,
-      "next_pos": seqlen,
+      "next_pos": true_length + 1,
       "generated_tokens": jnp.zeros((bsz, 1), dtype=jnp.int32),
       "tokens": next_token,
     }, result
-
 
   @functools.partial(jax.jit, static_argnums=(0, 1))
   def generate(
@@ -450,14 +400,15 @@ class EntropixEngine:
         freqs_cis_slice,
         decode_state["cache"],
       )
-    #new_token, metrics = jax.vmap(lambda logit, score: self.sample_fn(logit[None, :], score[None, :]), in_axes=(0, 0))(logits, scores)
-    #new_state, new_token, *_ = jax.vmap(lambda logit: self.sample_fn(rng, decode_state["dslider_state"], logit[None, -1], DEFAULT_DS_CONFIG), in_axes=(0))(logits)
-    new_state, new_token, *_ = self.sample_fn(rng, decode_state["dslider_state"], logits[:, -1, :], DEFAULT_DS_CONFIG)
+
+    # TODO(xjdr): reduce slop tokens by penalizing slop weights
+    # logits = logits.at[:, -1, self.slop_tokens].multiply(self.slop_weights[None, :, None])
+    # new_token, metrics = jax.vmap(lambda logit, score: self.sample_fn(logit[None, :], score[None, :]), in_axes=(0, 0))(logits, scores)
+    new_state, new_token, *_ = self.sample_fn(
+      rng, decode_state["dslider_state"], logits[:, -1, :], DEFAULT_DS_CONFIG
+    )
     new_token = new_token.reshape((bsz, 1))
 
-    # TODO(xjdr):
-    #   - valid tokens should be set based on a min varent value
-    #   - we should sorting the top_k by entropy and varentropy values
     result = ResultTokens(
       data=jnp.concatenate(
         (
@@ -489,7 +440,6 @@ class EntropixEngine:
       "dslider_state": new_state,
     }, result
 
-
   @functools.partial(
     jax.jit,
     static_argnums=(0,),
@@ -518,8 +468,12 @@ class EntropixEngine:
     """
     bsz = prefix["tokens"].shape[0]
     layers, _, max_seq_len, kv_heads, head_dim = prefix["cache"].k.shape
-    new_k = jnp.broadcast_to(prefix["cache"].k, (layers, bsz, max_seq_len, kv_heads, head_dim))
-    new_v = jnp.broadcast_to(prefix["cache"].v, (layers, bsz, max_seq_len, kv_heads, head_dim))
+    new_k = jnp.broadcast_to(
+      prefix["cache"].k, (layers, bsz, max_seq_len, kv_heads, head_dim)
+    )
+    new_v = jnp.broadcast_to(
+      prefix["cache"].v, (layers, bsz, max_seq_len, kv_heads, head_dim)
+    )
     new_cache = KVCache(k=new_k, v=new_v)
 
     return {
@@ -528,5 +482,7 @@ class EntropixEngine:
       "next_pos": prefix["next_pos"],
       "generated_tokens": prefix["generated_tokens"],
       "tokens": prefix["tokens"],
-      "dslider_state": initialize_state(bsz, prefix["logits"].shape[-1], DEFAULT_DS_CONFIG),
+      "dslider_state": initialize_state(
+        bsz, prefix["logits"].shape[-1], DEFAULT_DS_CONFIG
+      ),
     }

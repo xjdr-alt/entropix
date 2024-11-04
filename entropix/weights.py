@@ -1,4 +1,5 @@
-from typing import List, NamedTuple
+from typing import List, NamedTuple, Optional, Tuple
+from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
@@ -30,6 +31,23 @@ class XfmrWeights(NamedTuple):
   layer_weights: List[LayerWeights]
 
 
+@dataclass
+class WeightConfig:
+  """Configuration for weight loading and sharding."""
+
+  dp_dim: str = "dp"
+  mp_dim: str = "mp"
+  fsdp_dim: str = "fsdp"
+
+
+def create_mesh(device_count: int) -> jax.sharding.Mesh:
+  """Creates device mesh for distributed execution."""
+  devices = jax.devices()
+  mesh_shape = (device_count, 1)
+  device_mesh = jax.experimental.mesh_utils.create_device_mesh(mesh_shape)
+  return jax.sharding.Mesh(device_mesh, ("mp", "fsdp"))
+
+
 def create_partition_spec(key):
   dp = "dp"
   mp = "mp"
@@ -48,11 +66,15 @@ def create_partition_spec(key):
     return PS(fsdp, mp)
 
 
-def load_weights(ckpt_dir: Path, model_params):
+def load_weights(
+  ckpt_dir: Path, model_params, weight_config: Optional[WeightConfig] = None
+) -> Tuple[XfmrWeights, jax.sharding.Mesh]:
+  """Load and shard model weights across devices."""
+  weight_config = weight_config or WeightConfig()
+  mesh = create_mesh(jax.device_count())
+
   w = {}
   layer_weights = []
-  # TODO(xjdr): this should be set by jax.device_count()
-  mesh = jax.sharding.Mesh(mesh_utils.create_device_mesh((jax.device_count(), 1)), ("mp", "fsdp"))
 
   for file in ckpt_dir.glob("*.npy"):
     name = ".".join(str(file).split("/")[-1].split(".")[:-1])
@@ -67,7 +89,7 @@ def load_weights(ckpt_dir: Path, model_params):
           model_params.n_local_heads if "wq" in name else model_params.n_local_kv_heads,
           model_params.head_dim,
         )
-    #print(name, weight.shape, sharding._to_xla_hlo_sharding(weight.ndim))
+    # print(name, weight.shape, sharding._to_xla_hlo_sharding(weight.ndim))
     w[name] = jax.device_put(weight, sharding)
 
   for i in range(model_params.n_layers):
