@@ -522,24 +522,20 @@ class Driver:
   ) -> Tuple[jax.Array | np.ndarray, int]:
     content = request.prefill_content
     if isinstance(content, str):
-      # If it's text input, tokenize and pad the input.
-      tokens = tokenizer.encode(
+      content = tokenizer.encode(
         content,
         bos=is_bos,
         eos=False,
         allowed_special="all",
       )
-      return jnp.array([tokens], dtype=jnp.int32), len(tokens)
-    else:
-      # If it's token input, pad the input.
-      return token_utils.pad_tokens(
-        content,
-        tokenizer.bos_id,
-        tokenizer.pad_id,
-        is_bos=is_bos,
-        max_prefill_length=max_prefill_length,
-        jax_padding=self._jax_padding,
-      )
+      content = jnp.array(content)
+    return token_utils.pad_tokens(
+      content,
+      tokenizer.bos_id,
+      tokenizer.pad_id,
+      is_bos=is_bos,
+      max_prefill_length=max_prefill_length,
+    )
 
   def _prefill_thread(self, idx: int):
     """Thread which runs in the background performing prefills."""
