@@ -12,18 +12,32 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from entropix.config import MODEL_CONFIGS, create_model_params
-from entropix.dslider import adaptive_dirichlet_step
-from entropix.engine import EntropixEngine
+from entropix.engine import LLAMA_1B_PARAMS, EntropixEngine
 from entropix.model import xfmr
 from entropix.orchestrator import Driver, EntropixOrchestrator
-from entropix.prompts import generate_chat_prompt
+from entropix.sampler import nucleus_sample, sample
 from entropix.tokenizer import Tokenizer
 from entropix.weights import load_weights
+from entropix.prompts import generate_chat_prompt
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+DEFAULT_PREFILL_BUCKETS = [
+    16,
+    32,
+    64,
+    128,
+    256,
+    512,
+    1024,
+    2048,
+    4096,
+    8192,
+    16384,
+    32768,
+]
 
 class Message(BaseModel):
   role: Literal["system", "user", "assistant"]
@@ -53,62 +67,50 @@ class ModelRequest:
 
 class ModelManager:
   def __init__(self):
-    self._orchestrator = None
-    self._tokenizer = None
-    self._is_ready = False
+    self.orchestrator = None
+    self.tokenizer = None
+    self.is_ready = False
     self._warmup_lock = asyncio.Lock()
 
   async def initialize(
     self,
-    model_name: str = "1B",
     ckpt_path: Path = Path("weights/1B-Instruct"),
     tokenizer_path: str = "entropix/tokenizer.model",
   ):
-    if self._is_ready:
+    if self.is_ready:
       return
 
     async with self._warmup_lock:
-      if self._is_ready:
+      if self.is_ready:  # Double check after acquiring lock
         return
 
-      logger.info(f"Initializing {model_name} model...")
+      logger.info("Initializing model...")
+      model_params = LLAMA_1B_PARAMS
+      xfmr_weights = load_weights(ckpt_path, n_layers=model_params.n_layers)
+      self.tokenizer = Tokenizer(tokenizer_path)
 
-      # Get config for specified model
-      if model_name not in MODEL_CONFIGS:
-        raise ValueError(f"Unknown model: {model_name}")
-
-      config = MODEL_CONFIGS[model_name]
-      model_params = create_model_params(config)
-
-      xfmr_weights, mesh = load_weights(ckpt_path, model_params)
-      self._tokenizer = Tokenizer(tokenizer_path)
       xfmr_fn = jax.jit(xfmr, static_argnames=("model_params",))
-      # sample_fn = jax.jit(nucleus_sample)
-      # sample_fn = jax.jit(sample)
-      sample_fn = jax.jit(adaptive_dirichlet_step)
-      num_engines = jax.device_count()
+      #sample_fn = jax.jit(nucleus_sample)
+      sample_fn = jax.jit(sample)
+      num_engines = 1
       driver = Driver(
         prefill_engines=[
-          EntropixEngine(
-            model_params, xfmr_weights, mesh, self._tokenizer, xfmr_fn, sample_fn
-          )
+          EntropixEngine(model_params, xfmr_weights, self.tokenizer, xfmr_fn, sample_fn)
           for _ in range(num_engines)
         ],
         generate_engines=[
-          EntropixEngine(
-            model_params, xfmr_weights, mesh, self._tokenizer, xfmr_fn, sample_fn
-          )
+          EntropixEngine(model_params, xfmr_weights, self.tokenizer, xfmr_fn, sample_fn)
           for _ in range(num_engines)
         ],
         prefill_params=[model_params] * num_engines,
         generate_params=[model_params] * num_engines,
       )
 
-      self._orchestrator = EntropixOrchestrator(driver)
+      self.orchestrator = EntropixOrchestrator(driver)
 
       # Perform warmup
       await self._warmup()
-      self._is_ready = True
+      self.is_ready = True
       logger.info("Model initialization and warmup complete")
 
   async def _warmup(self):
@@ -121,24 +123,26 @@ class ModelManager:
     )
 
     try:
-      async for _ in self._orchestrator.decode(warmup_request):
+      async for _ in self.orchestrator.decode(warmup_request):
         pass
       logger.info("Warmup complete")
     except Exception as e:
       logger.error(f"Warmup failed: {e}")
       raise
 
+
+
   async def generate_response(
     self, prompt: str, max_tokens: int
   ) -> AsyncGenerator[Tuple[str, List[int]], None]:
-    if not self._is_ready:
+    if not self.is_ready:
       raise HTTPException(status_code=503, detail="Model not initialized")
 
     request = ModelRequest(tokens=prompt, max_tokens=max_tokens, metadata=Metadata())
 
-    async for token_data in self._orchestrator.decode(request):
-      # token_data: [(' compare', [9616]), ("'s", [596]), (' is', [374]), (' ', [220]), (',', [11])]
-      yield token_data  # Yield the first tuple from the list
+    async for token_data in self.orchestrator.decode(request):
+      # token_data is [(str, [token])]
+      yield token_data[0]  # Yield the first tuple from the list
 
 
 app = FastAPI(title="Entropix Model Server")
@@ -157,43 +161,30 @@ async def stream_response(request: ChatCompletionRequest) -> AsyncGenerator[str,
   request_id = f"chatcmpl-{uuid.uuid4()}"
   created = int(time.time())
 
-  # Send the initial response with role only
+  # Send the initial response
   yield f"data: {json.dumps({'id': request_id, 'object': 'chat.completion.chunk', 'created': created, 'model': request.model, 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
 
   prompt = generate_chat_prompt(request)
   accumulated_text = ""
 
   try:
-    async for token_batch in model_manager.generate_response(
+    async for token_tuple in model_manager.generate_response(
       prompt, request.max_tokens
     ):
-      # Create a chunk with multiple choices, one for each response in the batch
+      text, _ = token_tuple  # Unpack the tuple
+      accumulated_text += text
+
       chunk = {
         "id": request_id,
         "object": "chat.completion.chunk",
         "created": created,
         "model": request.model,
-        "choices": [
-          {"index": idx, "delta": {"content": text}, "finish_reason": None}
-          for idx, (text, _) in enumerate(token_batch)
-        ],
+        "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
       }
       yield f"data: {json.dumps(chunk)}\n\n"
 
     # Send the final chunk
-    final_chunk = {
-      "id": request_id,
-      "object": "chat.completion.chunk",
-      "created": created,
-      "model": request.model,
-      "choices": [
-        {"index": idx, "delta": {}, "finish_reason": "stop"}
-        for idx in range(
-          len(token_batch)
-        )  # Use the same number of choices as the last batch
-      ],
-    }
-    yield f"data: {json.dumps(final_chunk)}\n\n"
+    yield f"data: {json.dumps({'id': request_id, 'object': 'chat.completion.chunk', 'created': created, 'model': request.model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
     yield "data: [DONE]\n\n"
 
   except Exception as e:
@@ -203,7 +194,7 @@ async def stream_response(request: ChatCompletionRequest) -> AsyncGenerator[str,
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest):
-  if not model_manager._is_ready:
+  if not model_manager.is_ready:
     raise HTTPException(status_code=503, detail="Model not initialized")
 
   return StreamingResponse(stream_response(request), media_type="text/event-stream")
@@ -212,8 +203,8 @@ async def create_chat_completion(request: ChatCompletionRequest):
 @app.get("/health")
 async def health_check():
   return {
-    "status": "healthy" if model_manager._is_ready else "initializing",
-    "model_initialized": model_manager._is_ready,
+    "status": "healthy" if model_manager.is_ready else "initializing",
+    "model_initialized": model_manager.is_ready,
   }
 
 

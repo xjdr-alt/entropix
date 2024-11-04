@@ -8,16 +8,12 @@ from functools import partial
 from entropix.config import ModelParams
 from entropix.kvcache import KVCache
 from entropix.weights import XfmrWeights, LayerWeights
-from jax.sharding import PartitionSpec as PS
-from jax.experimental.pallas.ops.gpu.rms_norm import rms_norm as pl_rms_norm
 
-shard = jax.lax.with_sharding_constraint
 
 DEFAULT_MASK_VALUE = -0.7 * float(jnp.finfo(jnp.dtype("float32")).max)
 
 
 def rms_norm(x: jax.Array, w: jax.Array, eps: float = 1e-6) -> jax.Array:
-  x = shard(x, PS())
   return w * (x * jax.lax.rsqrt(jax.lax.pow(x, 2).mean(-1, keepdims=True) + eps))
 
 def apply_rotary_emb(xq: jax.Array, xk: jax.Array, freqs_cis: jax.Array, dtype: jnp.dtype = jnp.float32) -> Tuple[jax.Array, jax.Array]:
@@ -34,14 +30,15 @@ def apply_rotary_emb(xq: jax.Array, xk: jax.Array, freqs_cis: jax.Array, dtype: 
 def attention(x: jax.Array, layer_weights: LayerWeights, model_params, cur_pos: int, layer_idx: int, freqs_cis: jax.Array, kvcache: KVCache, attn_mask: Optional[jax.Array] = None) -> Tuple[jax.Array, KVCache]:
   bsz, _, _ = x.shape
   n_rep = model_params.n_local_heads // model_params.n_local_kv_heads
-  xq = jnp.einsum('...e,enh->...nh', x, layer_weights.wq)
-  xk = jnp.einsum('...e,enh->...nh', x, layer_weights.wk)
-  xv = jnp.einsum('...e,enh->...nh', x, layer_weights.wv)
-  xq, xk = jax.vmap(lambda q, k: apply_rotary_emb(q, k, freqs_cis=freqs_cis), in_axes=(0, 0))(xq, xk)
-  xq = xq.reshape(bsz, -1, model_params.n_local_heads, model_params.head_dim)
-  xk = xk.reshape(bsz, -1, model_params.n_local_kv_heads, model_params.head_dim)
+  xq = jnp.dot(x, layer_weights.wq.T).reshape(bsz, -1, model_params.n_local_heads, model_params.head_dim)
+  xk = jnp.dot(x, layer_weights.wk.T).reshape(bsz, -1, model_params.n_local_kv_heads, model_params.head_dim)
+  xv = jnp.dot(x, layer_weights.wv.T).reshape(bsz, -1, model_params.n_local_kv_heads, model_params.head_dim)
+  xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
   keys, values, kvcache = kvcache.update(xk, xv, layer_idx, cur_pos, n_rep)
-  scores = jnp.einsum('...qnh,...knh->...nqk', xq, keys)
+  xq = jnp.transpose(xq, (0, 2, 1, 3))  # (bs, n_heads, seqlen, head_dim)
+  keys = jnp.transpose(keys, (0, 2, 3, 1))  # (bs, n_heads, head_dim, cache_len + seqlen)
+  values = jnp.transpose(values, (0, 2, 1, 3))  # (bs, n_heads, cache_len + seqlen, head_dim)
+  scores = jnp.matmul(xq, keys)
   pre_scores = scores / jnp.sqrt(model_params.head_dim)
   scores = pre_scores.astype(jnp.float32)  # Always do attention softmax at float32
   if attn_mask is not None:
@@ -49,16 +46,13 @@ def attention(x: jax.Array, layer_weights: LayerWeights, model_params, cur_pos: 
   mask = jnp.where(scores != 0.0, scores, DEFAULT_MASK_VALUE)
   padded_logits = jnp.where((mask >= DEFAULT_MASK_VALUE * 0.5), scores, DEFAULT_MASK_VALUE)
   scores = jax.nn.softmax(padded_logits, axis=-1).astype(x.dtype)
-  output = jnp.einsum('...nqk,...knh->...qnh', scores, values)
-  output = output.reshape((output.shape[0], output.shape[1], -1))
-  out = shard(jnp.dot(output, layer_weights.wo), PS())
+  output = jnp.matmul(scores, values)
+  output = jnp.swapaxes(output, 1, 2).reshape(xq.shape[0], xq.shape[2], -1)
+  out = jnp.dot(output, layer_weights.wo.T)
   return out, kvcache, pre_scores
 
 def feed_forward(x: jax.Array, layer_weights: LayerWeights) -> jax.Array:
- x = shard(x, PS())
- h1 = jax.nn.silu(shard(jnp.dot(x, layer_weights.w1), PS(None, None, 'mp')))
- h =  h1 * shard(jnp.dot(x, layer_weights.w3), PS(None, None, 'mp'))
- return shard(jnp.dot(h, layer_weights.w2), PS())
+ return jnp.dot(jax.nn.silu(jnp.dot(x, layer_weights.w1.T)) * jnp.dot(x, layer_weights.w3.T), layer_weights.w2.T)
 
 def xfmr(xfmr_weights: XfmrWeights, model_params: ModelParams, tokens: jax.Array, cur_pos: int, freqs_cis: jax.Array, kvcache: KVCache, attn_mask: Optional[jax.Array]=None) -> Tuple[jax.Array, KVCache]:
   h = xfmr_weights.tok_embeddings[tokens]
