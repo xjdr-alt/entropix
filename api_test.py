@@ -71,8 +71,8 @@ def test_non_streaming():
     stream=False,
   )
   for idx, choice in enumerate(completion.choices):
-    print(f"Choice {idx}: {choice.content}")
-  return completion.choices[0].content
+    print(f"Choice {idx}: {choice.message.content}")
+  return completion.choices[0].message.content
 
 
 def main():
@@ -86,7 +86,7 @@ def main():
     # Add a small delay between tests
     time.sleep(1)
 
-    # # Test streaming
+    # Test streaming
     streaming_response = test_streaming()
     print(f"\nStreaming response length: {len(streaming_response)}")
 

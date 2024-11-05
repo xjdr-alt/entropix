@@ -1,0 +1,71 @@
+services:
+  redis:
+    image: redis:alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    networks:
+      - entropix-network
+
+  entropix:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - ./weights:/app/weights:ro
+      - ./logs:/app/logs
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - entropix-network
+    ports:
+      - "8000:8000"
+
+  glances:
+    image: nicolargo/glances:latest
+    restart: always
+    pid: "host"
+    privileged: true
+    network_mode: "host"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /run/user/1000/podman/podman.sock:/run/user/1000/podman/podman.sock:ro
+      - /:/rootfs:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    environment:
+      - GLANCES_OPT=-w
+      - TZ=${TZ}
+    ports:
+      - "61208-61209:61208-61209"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    runtime: nvidia
+
+volumes:
+  redis-data:
+
+networks:
+  entropix-network:
+    driver: bridge
