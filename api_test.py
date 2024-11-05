@@ -54,34 +54,41 @@ def test_streaming():
   return full_response
 
 
-# def test_non_streaming():
-#     print("\nTesting non-streaming response:")
-#     completion = client.chat.completions.create(
-#         model="entropix-1b",
-#         messages=[
-#             {"role": "system", "content": "You are a helpful assistant."},
-#             {"role": "user", "content": "Think carefully in a step-by-step manner. which number is larger, 9.9 or 9.11?"}
-#         ],
-#         stream=False
-#     )
-#     print(completion.choices[0].message.content)
-#     return completion.choices[0].message.content
+def test_non_streaming():
+  print("\nTesting non-streaming response:")
+  completion = client.chat.completions.create(
+    model="entropix-1b",
+    messages=[
+      {
+        "role": "system",
+        "content": "You are a world class problem solver. You always think step-by-step and come to the proper solutions.",
+      },
+      {
+        "role": "user",
+        "content": "Think carefully in a step-by-step manner. which number is larger, 9.9 or 9.11?",
+      },
+    ],
+    stream=False,
+  )
+  for idx, choice in enumerate(completion.choices):
+    print(f"Choice {idx}: {choice.content}")
+  return completion.choices[0].content
 
 
 def main():
   print("Starting API tests...")
 
   try:
-    # Test streaming
-    streaming_response = test_streaming()
-    print(f"\nStreaming response length: {len(streaming_response)}")
+    # Test non-streaming
+    non_streaming_response = test_non_streaming()
+    print(f"\nNon-streaming response length: {len(non_streaming_response)}")
 
     # Add a small delay between tests
-    # time.sleep(1)
+    time.sleep(1)
 
-    # Test non-streaming
-    # non_streaming_response = test_non_streaming()
-    # print(f"\nNon-streaming response length: {len(non_streaming_response)}")
+    # # Test streaming
+    streaming_response = test_streaming()
+    print(f"\nStreaming response length: {len(streaming_response)}")
 
   except Exception as e:
     print(f"Error during testing: {str(e)}")

@@ -161,7 +161,6 @@ async def stream_response(request: ChatCompletionRequest) -> AsyncGenerator[str,
   yield f"data: {json.dumps({'id': request_id, 'object': 'chat.completion.chunk', 'created': created, 'model': request.model, 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
 
   prompt = generate_chat_prompt(request)
-  accumulated_text = ""
 
   try:
     async for token_batch in model_manager.generate_response(
@@ -201,44 +200,76 @@ async def stream_response(request: ChatCompletionRequest) -> AsyncGenerator[str,
     raise HTTPException(status_code=500, detail=str(e))
 
 
+async def non_streaming_response(request: ChatCompletionRequest):
+    request_id = f"chatcmpl-{uuid.uuid4()}"
+    created = int(time.time())
+    prompt = generate_chat_prompt(request)
+    choices = {}
+
+    async for token_batch in model_manager.generate_response(prompt, request.max_tokens):
+      for idx, (text, _) in enumerate(token_batch):
+        if idx not in choices:
+          choices[idx] = {"index": idx, "content": "", "finish_reason": None}
+        choices[idx]["content"] += text
+      for k, v in choices.items():
+        if v["finish_reason"] is None:
+          choices[k]["finish_reason"] = "DONE"
+
+    return {
+        "id": request_id,
+        "object": "chat.completion",
+        "created": created,
+        "model": request.model,
+        "choices": list(choices.values()),
+        "usage": {
+            "prompt_tokens": 0,  # You might want to add actual token counting
+            "completion_tokens": 0,
+            "total_tokens": 0
+        }
+    }
+
+
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest):
-  if not model_manager._is_ready:
-    raise HTTPException(status_code=503, detail="Model not initialized")
+    if not model_manager._is_ready:
+        raise HTTPException(status_code=503, detail="Model not initialized")
 
-  return StreamingResponse(stream_response(request), media_type="text/event-stream")
+    if request.stream:
+        return StreamingResponse(stream_response(request), media_type="text/event-stream")
+    else:
+        return await non_streaming_response(request)
 
 
 @app.get("/health")
 async def health_check():
-  return {
-    "status": "healthy" if model_manager._is_ready else "initializing",
-    "model_initialized": model_manager._is_ready,
-  }
+    return {
+        "status": "healthy" if model_manager._is_ready else "initializing",
+        "model_initialized": model_manager._is_ready,
+    }
 
 
 @app.on_event("startup")
 async def startup_event():
-  await model_manager.initialize()
+    await model_manager.initialize()
 
 
 if __name__ == "__main__":
-  import os
+    import os
 
-  import uvicorn
+    import uvicorn
 
-  os.environ["XLA_FLAGS"] = (
-    "--xla_gpu_enable_triton_softmax_fusion=true "
-    "--xla_gpu_triton_gemm_any=True "
-    "--xla_gpu_enable_async_collectives=true "
-    "--xla_gpu_enable_latency_hiding_scheduler=true "
-    "--xla_gpu_enable_highest_priority_async_stream=true "
-  )
+    os.environ["XLA_FLAGS"] = (
+        "--xla_gpu_enable_triton_softmax_fusion=true "
+        "--xla_gpu_triton_gemm_any=True "
+        "--xla_gpu_enable_async_collectives=true "
+        "--xla_gpu_enable_latency_hiding_scheduler=true "
+        "--xla_gpu_enable_highest_priority_async_stream=true "
+    )
 
-  uvicorn.run(
-    "main:app",
-    host="0.0.0.0",
-    port=8000,
-    log_level="info",
-    workers=1,  # Important: Keep this at 1 for JAX
-  )
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        log_level="info",
+        workers=1,  # Important: Keep this at 1 for JAX
+    )
