@@ -80,11 +80,11 @@ def main():
 
   try:
     # Test non-streaming
-    non_streaming_response = test_non_streaming()
-    print(f"\nNon-streaming response length: {len(non_streaming_response)}")
+    #non_streaming_response = test_non_streaming()
+    #print(f"\nNon-streaming response length: {len(non_streaming_response)}")
 
     # Add a small delay between tests
-    time.sleep(1)
+    #time.sleep(5)
 
     # Test streaming
     streaming_response = test_streaming()

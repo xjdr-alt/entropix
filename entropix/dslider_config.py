@@ -3,11 +3,13 @@ from dataclasses import dataclass
 import jax
 import jax.numpy as jnp
 from jax.tree_util import register_pytree_node_class
+import math
 
 # Constants
 MIN_TEMP = 1e-4
 MAX_TEMP = 1e4
 EPS = 1e-8
+VOCAB_SIZE = 128256
 
 
 @dataclass(frozen=True)
@@ -68,7 +70,7 @@ class ArgmaxThreshold:
   def tree_flatten(self):
     """For JAX pytree handling"""
     aux_data = {"weight": self.weight, "bias": self.bias}
-    return [], aux_data 
+    return [], aux_data
 
   @classmethod
   def tree_unflatten(cls, aux_data, arrays):
@@ -87,7 +89,7 @@ class DirichletThreshold:
   def tree_flatten(self):
     """For JAX pytree handling"""
     aux_data = {"weight": self.weight, "bias": self.bias}
-    return [], aux_data  
+    return [], aux_data
 
   @classmethod
   def tree_unflatten(cls, aux_data, arrays):
@@ -157,7 +159,10 @@ class DSConfig:
   2. take the empirical average of logprobs across position and prompts
   3. the support is all logprobs lying above the noise threshold (see normalize_logits in dslider.py)
   """
-  dirichlet_support: jnp.ndarray 
+  dirichlet_support: jnp.ndarray
+
+  # noise floor for logits normalization
+  noise_floor: float
 
   # Threshold parameters
   outlier_threshold: OutlierThreshold
@@ -238,51 +243,38 @@ register_pytree_node_class(ArgmaxThreshold)
 register_pytree_node_class(DirichletThreshold)
 register_pytree_node_class(TargetEntropy)
 
-# Default config values
 DEFAULT_DS_CONFIG = DSConfig(
-  # EMWA coefficients
-  emwa_logp_base=1.5,
-  emwa_logp_exp_factor=2.5,
-  emwa_dir_coeff=0.2,
-  emwa_temp_coeff=1,
-  emwa_dir_ent_coeff=0.15,
-  emwa_ent_scaffold_coeff=0.15,
-  emwa_varent_scaffold_coeff=0.15,
-  emwa_ent_naked_coeff=0.15,
-  emwa_varent_naked_coeff=0.15,
-  emwa_topk_ent_naked_coeff=0.15,
-  # Token cross entropy coefficients
-  token_cross_ent_scaffold_coeff=0.15,
-  token_cross_ent_naked_coeff=0.15,
-  token_cross_var_scaffold_coeff=0.15,
-  token_cross_var_naked_coeff=0.15,
-  # Dirichlet parameters
-  perturb_base_coeff=0.95,
-  perturb_exp_coeff=2.5,
-  dirichlet_support=jnp.arange(128256),  
-  # Threshold parameters
+  emwa_logp_base=4.0,
+  emwa_logp_exp_factor=3.0,
+  emwa_dir_coeff=0.70,
+  emwa_temp_coeff=0.70,
+  emwa_dir_ent_coeff=0.70,
+  emwa_ent_scaffold_coeff=0.70,
+  emwa_varent_scaffold_coeff=0.70,
+  emwa_ent_naked_coeff=0.70,
+  emwa_varent_naked_coeff=0.70,
+  emwa_topk_ent_naked_coeff=0.70,
+  token_cross_ent_scaffold_coeff=0.65,
+  token_cross_ent_naked_coeff=0.65,
+  token_cross_var_scaffold_coeff=0.75,
+  token_cross_var_naked_coeff=0.65,
+  perturb_base_coeff=10.0,
+  perturb_exp_coeff=1.0,
+  dirichlet_support=jnp.arange(VOCAB_SIZE, dtype=jnp.int32),
+  noise_floor=-12.0,
   outlier_threshold=OutlierThreshold(
-    bilinear=jnp.eye(4) * 0.15,  
-    linear_state_ent=jnp.ones(4) * 0.15,
-    linear_state_std=jnp.ones(4) * 0.15,
-    linear_naked_ent=0.15,
-    linear_naked_std=0.15,
-    linear_naked_varent=0.15,
-    bias=0.1, 
+    bilinear=jnp.ones((4, 4)) * 1.3,
+    linear_state_ent=jnp.ones(4) * 0.80,
+    linear_state_std=jnp.ones(4) * 0.80,
+    linear_naked_ent=1.2,
+    linear_naked_std=1.2,
+    linear_naked_varent=1.2,
+    bias=0.0,
   ),
-  argmax_threshold=ArgmaxThreshold(
-    weight=1.2, 
-    bias=0.1, 
-  ),
-  dirichlet_threshold=DirichletThreshold(
-    weight=1.2,  
-    bias=0.1,  
-  ),
+  argmax_threshold=ArgmaxThreshold(weight=1.0, bias=5.0),
+  dirichlet_threshold=DirichletThreshold(weight=1.0, bias=5.0),
   target_entropy=TargetEntropy(
-    linear=jnp.ones(4) * 0.15,
-    linear_inv_temp=jnp.ones(1) * 1.2,  
-    bias=0.1,  
+    linear=jnp.array([1.0, 1.0, 1.0, 1.0]), linear_inv_temp=jnp.ones(1) * 8.0, bias=0.0
   ),
-  # Token outlier parameters
-  outlier_topk=5,
+  outlier_topk=3,
 )
