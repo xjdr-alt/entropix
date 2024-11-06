@@ -3,12 +3,13 @@ from dataclasses import dataclass
 import jax
 import jax.numpy as jnp
 from jax.tree_util import register_pytree_node_class
+import math
 
 # Constants
 MIN_TEMP = 1e-4
 MAX_TEMP = 1e4
 EPS = 1e-8
-
+VOCAB_SIZE = 128256
 
 @dataclass(frozen=True)
 class OutlierThreshold:
@@ -159,6 +160,9 @@ class DSConfig:
   """
   dirichlet_support: jnp.ndarray 
 
+  # noise floor for logits normalization
+  noise_floor: float 
+  
   # Threshold parameters
   outlier_threshold: OutlierThreshold
   argmax_threshold: ArgmaxThreshold
@@ -259,7 +263,7 @@ DEFAULT_DS_CONFIG = DSConfig(
   # Dirichlet parameters
   perturb_base_coeff=0.95,
   perturb_exp_coeff=2.5,
-  dirichlet_support=jnp.arange(128256),  
+  dirichlet_support=jnp.arange(VOCAB_SIZE),  
   # Threshold parameters
   outlier_threshold=OutlierThreshold(
     bilinear=jnp.eye(4) * 0.15,  
@@ -283,6 +287,7 @@ DEFAULT_DS_CONFIG = DSConfig(
     linear_inv_temp=jnp.ones(1) * 1.2,  
     bias=0.1,  
   ),
+  noise_floor=-math.log(VOCAB_SIZE),
   # Token outlier parameters
   outlier_topk=5,
 )

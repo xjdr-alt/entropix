@@ -6,6 +6,96 @@ import jax.scipy.special as jsp
 
 
 @jax.jit
+def sample_dirichlet(key: jax.random.PRNGKey, alpha: jnp.ndarray) -> jnp.ndarray:
+  """Sample from a Dirichlet distribution."""
+  gamma_samples = jax.random.gamma(key, alpha, shape=alpha.shape)
+  return gamma_samples / jnp.sum(gamma_samples, axis=-1, keepdims=True)
+
+@jax.jit
+def dirichlet_log_likelihood_from_logprob(
+  logprobs: jnp.ndarray, alpha: jnp.ndarray
+) -> jnp.ndarray:
+  """
+  Computes Dirichlet log likelihood: 
+  
+  log Dir(p|α) = ln Γ(α₀) - ∑ᵢln Γ(αᵢ) + ∑ᵢ(αᵢ-1)ln(pᵢ)
+  
+  where:
+  - α₀ = ∑ᵢαᵢ is the sum of all parameters
+  - Γ(x) is the gamma function
+  - pᵢ are probabilities (passed as logprobs)
+  """
+  return (
+    jnp.sum((alpha - 1.0) * logprobs, axis=-1)
+    - jsp.gammaln(jnp.sum(alpha, axis=-1))
+    + jnp.sum(jsp.gammaln(alpha), axis=-1)
+  )
+
+@jax.jit
+def dirichlet_expectation(alpha: jnp.ndarray) -> jnp.ndarray:
+  """
+  Computes the expectation of p ~ Dir(α):
+  
+  E[p] = αᵢ/∑ⱼαⱼ
+  
+  where:
+  - αᵢ is the i-th parameter
+  - ∑ⱼαⱼ is the sum of all parameters
+  """
+  alpha_sum = jnp.sum(alpha, axis=-1, keepdims=True)
+  return alpha / alpha_sum
+
+@jax.jit
+def dirichlet_expected_entropy(alpha: jnp.ndarray) -> jnp.ndarray:
+  """
+  Computes the expected entropy of p ~ Dir(α):
+
+  E[H(p)] = ln B(α) + (α₀ - K)ψ(α₀) - ∑ⱼ(αⱼ - 1)ψ(αⱼ)
+  
+  where:
+  - B(α) is the multivariate beta function
+  - K is the dimension
+  - ψ(x) is the digamma function
+  """
+  alpha_sum = jnp.sum(alpha, axis=-1, keepdims=True)  # alpha_0
+  K = alpha.shape[-1]
+  # ln B(α) term
+  log_beta = jnp.sum(jsp.gammaln(alpha), axis=-1) - jsp.gammaln(
+    alpha_sum.squeeze()
+  )
+
+  # (α₀ - K)ψ(α₀) term
+  digamma_sum = jsp.digamma(alpha_sum)
+  second_term = (alpha_sum.squeeze() - K) * digamma_sum.squeeze()
+
+  # -sum((αⱼ - 1)ψ(αⱼ)) term
+  digamma_alpha = jsp.digamma(alpha)
+  third_term = -jnp.sum((alpha - 1) * digamma_alpha, axis=-1)
+
+  return log_beta + second_term + third_term
+
+@jax.jit
+def dirichlet_expected_varentropy(alpha: jnp.ndarray) -> jnp.ndarray:
+  """Compute the expected varentropy of p ~ Dir(α):
+   
+  E[∑ᵢ ln(pᵢ)² * pᵢ] = ∑ᵢ (αᵢ/α₀) * (ψ(αᵢ)² + ψ₁(αᵢ))
+
+  where:
+  - α₀ = ∑ᵢαᵢ is the sum of all parameters
+  - ψ(x) is the digamma function
+  - ψ₁(x) is the trigamma function (first derivative of digamma)
+  """
+  alpha_sum = jnp.sum(alpha, axis=-1, keepdims=True)  # α₀
+  # E[Xᵢ] = αᵢ/α₀
+  expected_x = alpha / alpha_sum
+  # ψ(αᵢ)² + ψ₁(αᵢ) term
+  digamma_alpha = jsp.digamma(alpha)
+  trigamma_alpha = jsp.polygamma(1, alpha)
+  squared_plus_deriv = digamma_alpha**2 + trigamma_alpha
+  # ∑ᵢ (αᵢ/α₀) * (ψ₁(αᵢ) + ψ(αᵢ)²)
+  return jnp.sum(expected_x * squared_plus_deriv, axis=-1)
+
+@jax.jit
 def halley_update(alpha, target_values):
   """
   Compute the Halley's method update direction for the function 

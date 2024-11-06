@@ -342,7 +342,7 @@ class EntropixEngine:
       mask = jnp.hstack([jnp.zeros((seqlen, start_pos)), mask], dtype=jnp.float32)
     return mask
 
-  @functools.partial(jax.jit, static_argnames=("self", "params"))
+  # @functools.partial(jax.jit, static_argnames=("self", "params"))
   def prefill(
     self,
     *,
@@ -415,7 +415,7 @@ class EntropixEngine:
     }, result
 
 
-  @functools.partial(jax.jit, static_argnums=(0, 1))
+  # @functools.partial(jax.jit, static_argnums=(0, 1))
   def generate(
     self,
     params: Params,
@@ -479,7 +479,7 @@ class EntropixEngine:
       length_idx=(2, 3),
       samples_per_slot=bsz,
     )
-
+    print(f"new_token: {new_token}")
     return {
       "logits": logits,
       "cache": kvcache,
@@ -490,14 +490,14 @@ class EntropixEngine:
     }, result
 
 
-  @functools.partial(
-    jax.jit,
-    static_argnums=(0,),
-    donate_argnums=(
-      1,
-      2,
-    ),
-  )
+  # @functools.partial(
+  #   jax.jit,
+  #   static_argnums=(0,),
+  #   donate_argnums=(
+  #     1,
+  #     2,
+  #   ),
+  # )
   def insert(
     self,
     prefix: Prefix,
