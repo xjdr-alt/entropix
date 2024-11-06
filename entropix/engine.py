@@ -379,6 +379,7 @@ class EntropixEngine:
         kvcache,
         attn_mask=attn_mask,
       )
+    dslider_state = initialize_state(padded_tokens[:,:true_length], logits[:, :true_length], DEFAULT_DS_CONFIG)
     # next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
     _, next_token = jax.lax.top_k(logits[:, -1], k=top_k)
     next_token = jnp.array(next_token, dtype=jnp.int32).reshape((top_k, 1))
@@ -412,6 +413,7 @@ class EntropixEngine:
       "next_pos": seqlen,
       "generated_tokens": jnp.zeros((bsz, 1), dtype=jnp.int32),
       "tokens": next_token,
+      "dslider_state": dslider_state,
     }, result
 
 

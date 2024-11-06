@@ -47,27 +47,41 @@ class DSState(NamedTuple):
   emwa_dir_ent: jnp.ndarray
   emwa_topk_ent_naked: jnp.ndarray
 
-@partial(jax.jit, static_argnames=("bsz", "vsz", "config", "dtype"))
-def initialize_state(
-  bsz: int, vsz: int, config: DSConfig, dtype=jnp.bfloat16
-) -> DSState:
+@partial(jax.jit, static_argnames=("config", "dtype"))
+def initialize_state(logits: jax.Array, config: DSConfig, dtype=jnp.bfloat16) -> DSState:
+  bsz, seqlen, _ = logits.shape
+  
+  logprobs = normalize_logits(logits, config.noise_floor)
+  ent, varent = ent_varent(logprobs)
+  
+  topk_logits, _ = jax.lax.top_k(logprobs, config.outlier_topk)
+  topk_logprobs = normalize_logits(topk_logits, config.noise_floor)
+  topk_ent, topk_indices = ent_varent(topk_logprobs)
+  
+  logprobs_on_supp = normalize_logits(logits[..., config.dirichlet_support], config.noise_floor)
+  avg_logprobs_on_supp = jnp.mean(logprobs_on_supp, axis=1)
+  
+  initial_dir = fit_dirichlet(avg_logprobs_on_supp)[:, None, :]
+  avg_dir_ent = dirichlet_log_likelihood_from_logprob(logprobs_on_supp, initial_dir).mean(axis=-1)
+
+  initial_cross_ent_naked = -jnp.take_along_axis(logprobs, topk_indices, axis=-1).mean(axis=-1)
+  initial_cross_var_naked = jnp.take_along_axis(varent, topk_indices, axis=-1).var(axis=-1)
   state = DSState(
-    emwa_dir=jnp.ones((bsz, config.dirichlet_support.size), dtype=dtype),
-    emwa_logp_on_supp=jnp.zeros((bsz, config.dirichlet_support.size), dtype=dtype),
+    emwa_dir=initial_dir,
+    emwa_logp_on_supp=avg_logprobs_on_supp,
     emwa_temp=jnp.ones((bsz,), dtype=dtype),
-    emwa_ent_scaffold=jnp.zeros((bsz,), dtype=dtype),
-    emwa_ent_naked=jnp.zeros((bsz,), dtype=dtype),
+    emwa_ent_scaffold=ent,
+    emwa_ent_naked=ent,
     emwa_varent_scaffold=jnp.zeros((bsz,), dtype=dtype),
-    emwa_varent_naked=jnp.zeros((bsz,), dtype=dtype),
-    token_cross_ent_scaffold=jnp.zeros((bsz,), dtype=dtype),
-    token_cross_ent_naked=jnp.zeros((bsz,), dtype=dtype),
+    emwa_varent_naked=varent,
+    token_cross_ent_scaffold=ent,
+    token_cross_ent_naked=initial_cross_ent_naked,
     token_cross_var_scaffold=jnp.zeros((bsz,), dtype=dtype),
-    token_cross_var_naked=jnp.zeros((bsz,), dtype=dtype),
-    emwa_dir_ent=jnp.zeros((bsz,), dtype=dtype),
-    emwa_topk_ent_naked=jnp.zeros((bsz,), dtype=dtype),
+    token_cross_var_naked=initial_cross_var_naked,
+    emwa_dir_ent=avg_dir_ent,
+    emwa_topk_ent_naked=topk_ent,
   )
   return state
-
 
 # @partial(jax.jit, static_argnames=("config",))
 def adaptive_dirichlet_step(
@@ -206,7 +220,6 @@ def adaptive_dirichlet_step(
     emwa_dir_ent=new_emwa_dir_ent,
     emwa_topk_ent_naked=new_emwa_topk_ent_naked,
   )
-
   return (
     new_state,
     output_tokens,

@@ -244,50 +244,61 @@ register_pytree_node_class(TargetEntropy)
 
 # Default config values
 DEFAULT_DS_CONFIG = DSConfig(
-  # EMWA coefficients
-  emwa_logp_base=1.5,
-  emwa_logp_exp_factor=2.5,
-  emwa_dir_coeff=0.2,
-  emwa_temp_coeff=1,
-  emwa_dir_ent_coeff=0.15,
-  emwa_ent_scaffold_coeff=0.15,
-  emwa_varent_scaffold_coeff=0.15,
-  emwa_ent_naked_coeff=0.15,
-  emwa_varent_naked_coeff=0.15,
-  emwa_topk_ent_naked_coeff=0.15,
-  # Token cross entropy coefficients
-  token_cross_ent_scaffold_coeff=0.15,
-  token_cross_ent_naked_coeff=0.15,
-  token_cross_var_scaffold_coeff=0.15,
-  token_cross_var_naked_coeff=0.15,
-  # Dirichlet parameters
-  perturb_base_coeff=0.95,
-  perturb_exp_coeff=2.5,
-  dirichlet_support=jnp.arange(VOCAB_SIZE),  
-  # Threshold parameters
-  outlier_threshold=OutlierThreshold(
-    bilinear=jnp.eye(4) * 0.15,  
-    linear_state_ent=jnp.ones(4) * 0.15,
-    linear_state_std=jnp.ones(4) * 0.15,
-    linear_naked_ent=0.15,
-    linear_naked_std=0.15,
-    linear_naked_varent=0.15,
-    bias=0.1, 
-  ),
-  argmax_threshold=ArgmaxThreshold(
-    weight=1.2, 
-    bias=0.1, 
-  ),
-  dirichlet_threshold=DirichletThreshold(
-    weight=1.2,  
-    bias=0.1,  
-  ),
-  target_entropy=TargetEntropy(
-    linear=jnp.ones(4) * 0.15,
-    linear_inv_temp=jnp.ones(1) * 1.2,  
-    bias=0.1,  
-  ),
-  noise_floor=-math.log(VOCAB_SIZE),
-  # Token outlier parameters
-  outlier_topk=5,
+    # EMWA (Exponential Moving Weighted Average) coefficients
+    # Higher values (closer to 1) mean faster adaptation to new values
+    emwa_logp_base=2.0,  # Base for logp coefficient calculation
+    emwa_logp_exp_factor=1.0,  # Exponential factor for logp coefficient
+    emwa_dir_coeff=0.1,  # Dirichlet parameter update rate
+    emwa_temp_coeff=0.1,  # Temperature update rate
+    emwa_dir_ent_coeff=0.1,  # Dirichlet entropy update rate
+    emwa_ent_scaffold_coeff=0.1,  # Scaffold entropy update rate
+    emwa_varent_scaffold_coeff=0.1,  # Scaffold variance entropy update rate
+    emwa_ent_naked_coeff=0.1,  # Raw entropy update rate
+    emwa_varent_naked_coeff=0.1,  # Raw variance entropy update rate
+    emwa_topk_ent_naked_coeff=0.1,  # Top-k entropy update rate
+
+    # Cross entropy coefficients (between 0 and 1)
+    token_cross_ent_scaffold_coeff=0.1,
+    token_cross_ent_naked_coeff=0.1,
+    token_cross_var_scaffold_coeff=0.1,
+    token_cross_var_naked_coeff=0.1,
+
+    # Dirichlet perturbation parameters
+    perturb_base_coeff=2.0,
+    perturb_exp_coeff=1.0,
+    # Example support array - should be replaced with actual vocabulary subset
+    dirichlet_support=jnp.array([0, 1, 2, 3, 4], dtype=jnp.int32),
+
+    # Noise floor for numerical stability
+    noise_floor=-10.0,  # Log domain value
+
+    # Threshold configurations
+    outlier_threshold=OutlierThreshold(
+        bilinear=jnp.eye(4) * 0.1,  # Initial correlation matrix
+        linear_state_ent=jnp.ones(4) * 0.1,
+        linear_state_std=jnp.ones(4) * 0.1,
+        linear_naked_ent=0.1,
+        linear_naked_std=0.1,
+        linear_naked_varent=0.1,
+        bias=0.0
+    ),
+    
+    argmax_threshold=ArgmaxThreshold(
+        weight=1.0,
+        bias=0.0
+    ),
+    
+    dirichlet_threshold=DirichletThreshold(
+        weight=1.0,
+        bias=0.0
+    ),
+    
+    target_entropy=TargetEntropy(
+        linear=jnp.ones(4) * 0.25,  # Equal weighting for each entropy component
+        linear_inv_temp=jnp.ones(1),  # Single batch size example
+        bias=0.0
+    ),
+
+    # Number of top tokens to consider for entropy calculations
+    outlier_topk=10
 )

@@ -19,17 +19,17 @@ def test_streaming():
     stream=True,
   )
 
-  # stream = client.chat.completions.create(
-  #  model="entropix-1b",
-  #  messages=[
-  #    {"role": "system", "content": "You are a world class problem solver. You always think step-by-step and come to the proper solutions."},
-  #    {
-  #      "role": "user",
-  #      "content": "Think carefully in a step-by-step manner. Oliver picks 44 kiwis on Friday. Then he picks 58 kiwis on Saturday. On Sunday, he picks double the number of kiwis he did on Friday, but five of them were a bit smaller than average. How many kiwis does Oliver have?",
-  #    },
-  #  ],
-  #  stream=True,
-  # )
+  stream = client.chat.completions.create(
+   model="entropix-1b",
+   messages=[
+     {"role": "system", "content": "You are a world class problem solver. You always think step-by-step and come to the proper solutions."},
+     {
+       "role": "user",
+       "content": "Think carefully in a step-by-step manner. Oliver picks 44 kiwis on Friday. Then he picks 58 kiwis on Saturday. On Sunday, he picks double the number of kiwis he did on Friday, but five of them were a bit smaller than average. How many kiwis does Oliver have?",
+     },
+   ],
+   stream=True,
+  )
 
   full_response = ""
   choices = {}
