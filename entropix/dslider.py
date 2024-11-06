@@ -47,8 +47,8 @@ class DSState(NamedTuple):
   emwa_dir_ent: jnp.ndarray
   emwa_topk_ent_naked: jnp.ndarray
 
-# @partial(jax.jit, static_argnames=("config", "dtype"))
-def initialize_state(bsz: int, logits: jax.Array, config: DSConfig, dtype=jnp.bfloat16) -> DSState:
+@partial(jax.jit, static_argnames=("bsz", "config", "dtype"))
+def initialize_state(logits: jax.Array, bsz: int, config: DSConfig, dtype=jnp.bfloat16) -> DSState:
   _, seqlen, _ = logits.shape
   logprobs = normalize_logits(logits, config.noise_floor)
   ent, varent = ent_varent(logprobs)
@@ -86,7 +86,7 @@ def initialize_state(bsz: int, logits: jax.Array, config: DSConfig, dtype=jnp.bf
   )
   return state
 
-# @partial(jax.jit, static_argnames=("config",))
+@partial(jax.jit, static_argnames=("config", "wild"))
 def adaptive_dirichlet_step(
   key: jax.random.PRNGKey,
   state: DSState,
@@ -235,7 +235,7 @@ def adaptive_dirichlet_step(
     scaffold_token_logprob,
   )
 
-# @jax.jit
+@jax.jit
 def update_emwa(new: jax.Array, old: jax.Array, coeff: float | jax.Array) -> jax.Array:
   return coeff * new + (1 - coeff) * old
 

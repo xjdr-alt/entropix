@@ -297,7 +297,7 @@ class EntropixEngine:
       mask = jnp.hstack([jnp.zeros((seqlen, start_pos)), mask], dtype=jnp.float32)
     return mask
 
-  @functools.partial(jax.jit, static_argnames=("self", "params"))
+  # @functools.partial(jax.jit, static_argnames=("self", "params"))
   def prefill(
     self,
     *,
@@ -471,7 +471,7 @@ class EntropixEngine:
     new_k = jnp.broadcast_to(prefix["cache"].k, (layers, bsz, max_seq_len, kv_heads, head_dim))
     new_v = jnp.broadcast_to(prefix["cache"].v, (layers, bsz, max_seq_len, kv_heads, head_dim))
     new_cache = KVCache(k=new_k, v=new_v)
-    dslider_state = initialize_state(bsz, prefix["logits"], DEFAULT_DS_CONFIG)
+    dslider_state = initialize_state(prefix["logits"], bsz, DEFAULT_DS_CONFIG)
     return {
         "logits": prefix["logits"],
         "cache": new_cache,
