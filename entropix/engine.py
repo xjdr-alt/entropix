@@ -482,7 +482,5 @@ class EntropixEngine:
       "next_pos": prefix["next_pos"],
       "generated_tokens": prefix["generated_tokens"],
       "tokens": prefix["tokens"],
-      "dslider_state": initialize_state(
-        bsz, prefix["logits"].shape[-1], DEFAULT_DS_CONFIG
-      ),
+      "dslider_state": initialize_state(prefix["logits"], bsz, DEFAULT_DS_CONFIG),
     }

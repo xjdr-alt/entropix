@@ -33,6 +33,10 @@ fairscale = "^0.4.13"
 lm-eval = "^0.4.4"
 langdetect = "^1.0.9"
 immutabledict = "^4.2.0"
+anthropic = "^0.39.0"
+requests = "^2.32.3"
+pandas = "^2.2.3"
+blobfile = "^3.0.0"
 
 
 

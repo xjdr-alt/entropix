@@ -1,13 +1,14 @@
 import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 from pathlib import Path
-from typing import AsyncGenerator, List, Literal, Optional, Tuple
+from typing import AsyncGenerator, List, Literal, Optional, Set, Tuple
 
 import jax
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -21,8 +22,21 @@ from entropix.prompts import generate_chat_prompt
 from entropix.tokenizer import Tokenizer
 from entropix.weights import load_weights
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging
+logging.basicConfig(
+  level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
+
+# Load and validate environment variables
+API_KEYS: Set[str] = {
+  key.strip() for key in os.getenv("API_KEYS", "sk-test-key").split(",")
+}
+ALLOWED_ORIGINS: Set[str] = {
+  origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "*").split(",")
+}
+WEIGHTS_DIR = os.getenv("WEIGHTS_DIR", "weights")
+MODEL_NAME = os.getenv("MODEL_NAME", "1B")
 
 
 class Message(BaseModel):
@@ -60,8 +74,8 @@ class ModelManager:
 
   async def initialize(
     self,
-    model_name: str = "1B",
-    ckpt_path: Path = Path("weights/1B-Instruct"),
+    model_name: str = MODEL_NAME,
+    ckpt_path: Path = Path(WEIGHTS_DIR) / f"{MODEL_NAME}-Instruct",
     tokenizer_path: str = "entropix/tokenizer.model",
   ):
     if self._is_ready:
@@ -80,36 +94,43 @@ class ModelManager:
       config = MODEL_CONFIGS[model_name]
       model_params = create_model_params(config)
 
-      xfmr_weights, mesh = load_weights(ckpt_path, model_params)
-      self._tokenizer = Tokenizer(tokenizer_path)
-      xfmr_fn = jax.jit(xfmr, static_argnames=("model_params",))
-      # sample_fn = jax.jit(nucleus_sample)
-      # sample_fn = jax.jit(sample)
-      sample_fn = jax.jit(adaptive_dirichlet_step)
-      num_engines = jax.device_count()
-      driver = Driver(
-        prefill_engines=[
-          EntropixEngine(
-            model_params, xfmr_weights, mesh, self._tokenizer, xfmr_fn, sample_fn
-          )
-          for _ in range(num_engines)
-        ],
-        generate_engines=[
-          EntropixEngine(
-            model_params, xfmr_weights, mesh, self._tokenizer, xfmr_fn, sample_fn
-          )
-          for _ in range(num_engines)
-        ],
-        prefill_params=[model_params] * num_engines,
-        generate_params=[model_params] * num_engines,
-      )
+      try:
+        xfmr_weights, mesh = load_weights(ckpt_path, model_params)
+        self._tokenizer = Tokenizer(tokenizer_path)
+        xfmr_fn = jax.jit(xfmr, static_argnames=("model_params",))
+        sample_fn = jax.jit(adaptive_dirichlet_step)
 
-      self._orchestrator = EntropixOrchestrator(driver)
+        # Use all available devices
+        num_engines = jax.device_count()
+        logger.info(f"Initializing with {num_engines} devices")
 
-      # Perform warmup
-      await self._warmup()
-      self._is_ready = True
-      logger.info("Model initialization and warmup complete")
+        driver = Driver(
+          prefill_engines=[
+            EntropixEngine(
+              model_params, xfmr_weights, mesh, self._tokenizer, xfmr_fn, sample_fn
+            )
+            for _ in range(num_engines)
+          ],
+          generate_engines=[
+            EntropixEngine(
+              model_params, xfmr_weights, mesh, self._tokenizer, xfmr_fn, sample_fn
+            )
+            for _ in range(num_engines)
+          ],
+          prefill_params=[model_params] * num_engines,
+          generate_params=[model_params] * num_engines,
+        )
+
+        self._orchestrator = EntropixOrchestrator(driver)
+
+        # Perform warmup
+        await self._warmup()
+        self._is_ready = True
+        logger.info("Model initialization and warmup complete")
+
+      except Exception as e:
+        logger.error(f"Failed to initialize model: {str(e)}")
+        raise
 
   async def _warmup(self):
     logger.info("Starting model warmup...")
@@ -125,7 +146,7 @@ class ModelManager:
         pass
       logger.info("Warmup complete")
     except Exception as e:
-      logger.error(f"Warmup failed: {e}")
+      logger.error(f"Warmup failed: {str(e)}")
       raise
 
   async def generate_response(
@@ -137,37 +158,49 @@ class ModelManager:
     request = ModelRequest(tokens=prompt, max_tokens=max_tokens, metadata=Metadata())
 
     async for token_data in self._orchestrator.decode(request):
-      # token_data: [(' compare', [9616]), ("'s", [596]), (' is', [374]), (' ', [220]), (',', [11])]
-      yield token_data  # Yield the first tuple from the list
+      yield token_data
 
 
+# Initialize FastAPI app
 app = FastAPI(title="Entropix Model Server")
 model_manager = ModelManager()
 
+# Configure CORS
 app.add_middleware(
   CORSMiddleware,
-  allow_origins=["*"],
+  allow_origins=[origin for origin in ALLOWED_ORIGINS],
   allow_credentials=True,
   allow_methods=["*"],
   allow_headers=["*"],
 )
 
 
+# API key validation middleware
+@app.middleware("http")
+async def validate_api_key(request: Request, call_next):
+  if request.url.path == "/health":
+    return await call_next(request)
+
+  api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
+  if not api_key or api_key not in API_KEYS:
+    print(f"Invalid API key: {api_key}")
+    print(f"{request.headers}")
+    raise HTTPException(status_code=401, detail="Invalid API key")
+  return await call_next(request)
+
+
 async def stream_response(request: ChatCompletionRequest) -> AsyncGenerator[str, None]:
   request_id = f"chatcmpl-{uuid.uuid4()}"
   created = int(time.time())
 
-  # Send the initial response with role only
   yield f"data: {json.dumps({'id': request_id, 'object': 'chat.completion.chunk', 'created': created, 'model': request.model, 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
 
   prompt = generate_chat_prompt(request)
-  accumulated_text = ""
 
   try:
     async for token_batch in model_manager.generate_response(
       prompt, request.max_tokens
     ):
-      # Create a chunk with multiple choices, one for each response in the batch
       chunk = {
         "id": request_id,
         "object": "chat.completion.chunk",
@@ -180,7 +213,6 @@ async def stream_response(request: ChatCompletionRequest) -> AsyncGenerator[str,
       }
       yield f"data: {json.dumps(chunk)}\n\n"
 
-    # Send the final chunk
     final_chunk = {
       "id": request_id,
       "object": "chat.completion.chunk",
@@ -188,9 +220,7 @@ async def stream_response(request: ChatCompletionRequest) -> AsyncGenerator[str,
       "model": request.model,
       "choices": [
         {"index": idx, "delta": {}, "finish_reason": "stop"}
-        for idx in range(
-          len(token_batch)
-        )  # Use the same number of choices as the last batch
+        for idx in range(len(token_batch))
       ],
     }
     yield f"data: {json.dumps(final_chunk)}\n\n"
@@ -201,12 +231,48 @@ async def stream_response(request: ChatCompletionRequest) -> AsyncGenerator[str,
     raise HTTPException(status_code=500, detail=str(e))
 
 
+async def non_streaming_response(request: ChatCompletionRequest):
+  request_id = f"chatcmpl-{uuid.uuid4()}"
+  created = int(time.time())
+  prompt = generate_chat_prompt(request)
+  choices = {}
+
+  async for token_batch in model_manager.generate_response(prompt, request.max_tokens):
+    for idx, (text, _) in enumerate(token_batch):
+      if idx not in choices:
+        choices[idx] = {
+          "index": idx,
+          "message": {"role": "assistant", "content": ""},
+          "finish_reason": None,
+        }
+      choices[idx]["message"]["content"] += text
+
+  for choice in choices.values():
+    choice["finish_reason"] = "stop"
+
+  return {
+    "id": request_id,
+    "object": "chat.completion",
+    "created": created,
+    "model": request.model,
+    "choices": list(choices.values()),
+    "usage": {
+      "prompt_tokens": 0,  # TODO: Implement token counting
+      "completion_tokens": 0,
+      "total_tokens": 0,
+    },
+  }
+
+
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest):
   if not model_manager._is_ready:
     raise HTTPException(status_code=503, detail="Model not initialized")
 
-  return StreamingResponse(stream_response(request), media_type="text/event-stream")
+  if request.stream:
+    return StreamingResponse(stream_response(request), media_type="text/event-stream")
+  else:
+    return await non_streaming_response(request)
 
 
 @app.get("/health")
@@ -214,6 +280,8 @@ async def health_check():
   return {
     "status": "healthy" if model_manager._is_ready else "initializing",
     "model_initialized": model_manager._is_ready,
+    "num_gpus": jax.device_count(),
+    "model_name": MODEL_NAME,
   }
 
 
@@ -223,20 +291,10 @@ async def startup_event():
 
 
 if __name__ == "__main__":
-  import os
-
   import uvicorn
 
-  os.environ["XLA_FLAGS"] = (
-    "--xla_gpu_enable_triton_softmax_fusion=true "
-    "--xla_gpu_triton_gemm_any=True "
-    "--xla_gpu_enable_async_collectives=true "
-    "--xla_gpu_enable_latency_hiding_scheduler=true "
-    "--xla_gpu_enable_highest_priority_async_stream=true "
-  )
-
   uvicorn.run(
-    "main:app",
+    "server_main:app",
     host="0.0.0.0",
     port=8000,
     log_level="info",

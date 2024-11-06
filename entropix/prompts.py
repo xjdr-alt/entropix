@@ -61,7 +61,6 @@ Today Date: {formatted_date()}
             # Do we care about tool_plan or tool_results or tool_calls here?
             prompt += header(message.content, role_to_header[message.role])
 
-    print(prompt)
     return prompt
 
 # class ToolProcessor:
