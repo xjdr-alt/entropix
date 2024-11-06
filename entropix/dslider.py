@@ -20,7 +20,7 @@ def ent_varent(logp: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
   """Compute entropy and varentropy from log probabilities."""
   p = jnp.exp(logp)
   ent = -jnp.sum(p * logp, axis=-1)
-  diff = logp + ent[:, None] 
+  diff = logp + ent[..., None] 
   varent = jnp.sum(p * diff**2, axis=-1)
   return ent, varent
 
@@ -47,39 +47,42 @@ class DSState(NamedTuple):
   emwa_dir_ent: jnp.ndarray
   emwa_topk_ent_naked: jnp.ndarray
 
-@partial(jax.jit, static_argnames=("config", "dtype"))
-def initialize_state(logits: jax.Array, config: DSConfig, dtype=jnp.bfloat16) -> DSState:
-  bsz, seqlen, _ = logits.shape
-  
+# @partial(jax.jit, static_argnames=("config", "dtype"))
+def initialize_state(bsz: int, logits: jax.Array, config: DSConfig, dtype=jnp.bfloat16) -> DSState:
+  _, seqlen, _ = logits.shape
   logprobs = normalize_logits(logits, config.noise_floor)
   ent, varent = ent_varent(logprobs)
-  
-  topk_logits, _ = jax.lax.top_k(logprobs, config.outlier_topk)
+  avg_ent, avg_varent = ent.mean(axis=-1), varent.mean(axis=-1)
+
+  topk_logits, topk_indices = jax.lax.top_k(logprobs, config.outlier_topk)
   topk_logprobs = normalize_logits(topk_logits, config.noise_floor)
-  topk_ent, topk_indices = ent_varent(topk_logprobs)
-  
+  topk_ent, _ = ent_varent(topk_logprobs)
+  avg_topk_ent = topk_ent.mean(axis=-1)
+
   logprobs_on_supp = normalize_logits(logits[..., config.dirichlet_support], config.noise_floor)
   avg_logprobs_on_supp = jnp.mean(logprobs_on_supp, axis=1)
   
-  initial_dir = fit_dirichlet(avg_logprobs_on_supp)[:, None, :]
-  avg_dir_ent = dirichlet_log_likelihood_from_logprob(logprobs_on_supp, initial_dir).mean(axis=-1)
+  initial_dir, _, _ = fit_dirichlet(avg_logprobs_on_supp)
+  avg_dir_ent = dirichlet_log_likelihood_from_logprob(logprobs_on_supp, initial_dir[:, None, :]).mean(axis=-1)
 
-  initial_cross_ent_naked = -jnp.take_along_axis(logprobs, topk_indices, axis=-1).mean(axis=-1)
-  initial_cross_var_naked = jnp.take_along_axis(varent, topk_indices, axis=-1).var(axis=-1)
+  topk_token_logprobs = jnp.take_along_axis(logprobs, topk_indices, axis=-1)
+  initial_cross_ent_naked = -topk_token_logprobs.mean(axis=(1, 2))
+  initial_cross_var_naked = topk_token_logprobs.var(axis=(1, 2))
+
   state = DSState(
-    emwa_dir=initial_dir,
-    emwa_logp_on_supp=avg_logprobs_on_supp,
+    emwa_dir=initial_dir.repeat(bsz, axis=0),
+    emwa_logp_on_supp=avg_logprobs_on_supp.repeat(bsz, axis=0),
     emwa_temp=jnp.ones((bsz,), dtype=dtype),
-    emwa_ent_scaffold=ent,
-    emwa_ent_naked=ent,
+    emwa_ent_scaffold=avg_ent.repeat(bsz, axis=0),
+    emwa_ent_naked=avg_ent.repeat(bsz, axis=0),
     emwa_varent_scaffold=jnp.zeros((bsz,), dtype=dtype),
-    emwa_varent_naked=varent,
-    token_cross_ent_scaffold=ent,
-    token_cross_ent_naked=initial_cross_ent_naked,
+    emwa_varent_naked=avg_varent.repeat(bsz, axis=0),
+    token_cross_ent_scaffold=avg_ent.repeat(bsz, axis=0),
+    token_cross_ent_naked=initial_cross_ent_naked.repeat(bsz, axis=0),
     token_cross_var_scaffold=jnp.zeros((bsz,), dtype=dtype),
-    token_cross_var_naked=initial_cross_var_naked,
-    emwa_dir_ent=avg_dir_ent,
-    emwa_topk_ent_naked=topk_ent,
+    token_cross_var_naked=initial_cross_var_naked.repeat(bsz, axis=0),
+    emwa_dir_ent=avg_dir_ent.repeat(bsz, axis=0),
+    emwa_topk_ent_naked=avg_topk_ent.repeat(bsz, axis=0),
   )
   return state
 
@@ -98,6 +101,7 @@ def adaptive_dirichlet_step(
   naked_log_probs = normalize_logits(logits, config.noise_floor)
   # update naked entropy rate
   naked_ent, naked_varent = ent_varent(naked_log_probs)
+  # fix shape issue!
   new_emwa_ent_naked = update_emwa(naked_ent, state.emwa_ent_naked, config.emwa_ent_naked_coeff)
   new_emwa_varent_naked = update_emwa(naked_varent, state.emwa_varent_naked, config.emwa_varent_naked_coeff)
   # entropy and varentropy vectors - shape (bsz, 4)
@@ -157,9 +161,10 @@ def adaptive_dirichlet_step(
   update emwa logp (on dirichlet support)
   """
   logprobs_on_supp = normalize_logits(tuned_logprobs[:, config.dirichlet_support], config.noise_floor)
+  print(f"logprobs_on_supp shape: {logprobs_on_supp.shape}")
   kl = jnp.sum(jnp.exp(logprobs_on_supp) * (logprobs_on_supp - state.emwa_logp_on_supp), axis=-1)
   emwa_logp_coeff = config.emwa_logp_base ** (-config.emwa_logp_exp_factor / (kl + EPS))
-  new_emwa_logp_on_supp = update_emwa(logprobs_on_supp, state.emwa_logp_on_supp, emwa_logp_coeff)
+  new_emwa_logp_on_supp = update_emwa(logprobs_on_supp, state.emwa_logp_on_supp, emwa_logp_coeff[...,None])
   new_emwa_dir, _, _ = fit_dirichlet(new_emwa_logp_on_supp)
   """
   update dirichlet and compute threshold
@@ -232,11 +237,8 @@ def adaptive_dirichlet_step(
   )
 
 # @jax.jit
-def update_emwa(new: jax.Array, old: jax.Array, coeff: jax.Array) -> jax.Array:
-  if isinstance(coeff, jax.Array):
-    return coeff[...,None] * new + (1 - coeff[...,None]) * old
-  else:
-    return coeff * new + (1 - coeff) * old
+def update_emwa(new: jax.Array, old: jax.Array, coeff: float | jax.Array) -> jax.Array:
+  return coeff * new + (1 - coeff) * old
 
 @partial(jax.jit, static_argnames=("config",))
 def compute_outlier_threshold(state_ent, state_std, naked_ent, naked_varent, config):

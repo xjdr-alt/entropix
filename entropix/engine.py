@@ -379,7 +379,6 @@ class EntropixEngine:
         kvcache,
         attn_mask=attn_mask,
       )
-    dslider_state = initialize_state(padded_tokens[:,:true_length], logits[:, :true_length], DEFAULT_DS_CONFIG)
     # next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
     _, next_token = jax.lax.top_k(logits[:, -1], k=top_k)
     next_token = jnp.array(next_token, dtype=jnp.int32).reshape((top_k, 1))
@@ -410,10 +409,9 @@ class EntropixEngine:
     return {
       "logits": logits,
       "cache": kvcache,
-      "next_pos": seqlen,
+      "next_pos": true_length + 1,
       "generated_tokens": jnp.zeros((bsz, 1), dtype=jnp.int32),
       "tokens": next_token,
-      "dslider_state": dslider_state,
     }, result
 
 
@@ -523,12 +521,12 @@ class EntropixEngine:
     new_k = jnp.broadcast_to(prefix["cache"].k, (layers, bsz, max_seq_len, kv_heads, head_dim))
     new_v = jnp.broadcast_to(prefix["cache"].v, (layers, bsz, max_seq_len, kv_heads, head_dim))
     new_cache = KVCache(k=new_k, v=new_v)
-
+    dslider_state = initialize_state(bsz, prefix["logits"], DEFAULT_DS_CONFIG)
     return {
-      "logits": prefix["logits"],
-      "cache": new_cache,
-      "next_pos": prefix["next_pos"],
-      "generated_tokens": prefix["generated_tokens"],
-      "tokens": prefix["tokens"],
-      "dslider_state": initialize_state(bsz, prefix["logits"].shape[-1], DEFAULT_DS_CONFIG),
+        "logits": prefix["logits"],
+        "cache": new_cache,
+        "next_pos": prefix["next_pos"],
+        "generated_tokens": prefix["generated_tokens"],
+        "tokens": prefix["tokens"],
+        "dslider_state": dslider_state
     }
