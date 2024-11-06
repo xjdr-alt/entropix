@@ -11,8 +11,6 @@ from entropix.config import ModelParams
 from entropix.dslider import initialize_state
 from entropix.dslider_config import DEFAULT_DS_CONFIG
 from entropix.kvcache import KVCache
-from entropix.dslider import initialize_state
-from entropix.dslider_config import DEFAULT_DS_CONFIG
 from entropix.tokenizer import Tokenizer
 
 """Defines the JetStream API.
@@ -299,7 +297,7 @@ class EntropixEngine:
       mask = jnp.hstack([jnp.zeros((seqlen, start_pos)), mask], dtype=jnp.float32)
     return mask
 
-  # @functools.partial(jax.jit, static_argnames=("self", "params"))
+  @functools.partial(jax.jit, static_argnames=("self", "params"))
   def prefill(
     self,
     *,
@@ -339,29 +337,7 @@ class EntropixEngine:
     # next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
     _, next_token = jax.lax.top_k(logits[:, true_length], k=top_k)
     next_token = jnp.array(next_token, dtype=jnp.int32).reshape((top_k, 1))
-    with self.mesh:
-      logits, kvcache, _ = self.xfmr_fn(
-        self.xfmr_weights,
-        params,
-        padded_tokens,
-        cur_pos,
-        self.freqs_cis[:seqlen],
-        kvcache,
-        attn_mask=attn_mask,
-      )
-    # next_token = jnp.argmax(logits[:, -1], axis=-1, keepdims=True).astype(jnp.int32)
-    _, next_token = jax.lax.top_k(logits[:, -1], k=top_k)
-    next_token = jnp.array(next_token, dtype=jnp.int32).reshape((top_k, 1))
     # Create arrays for tokens, validity, and lengths
-    tokens = next_token  # shape: (top_k, 1)
-    validity = jnp.ones_like(next_token, dtype=jnp.bool_)  # shape: (top_k, 1)
-    # Broadcast lengths to match batch dimension
-    lengths = jnp.broadcast_to(
-        jnp.array([[true_length + 1]], dtype=jnp.int32),
-        (top_k, 1)
-    )  # shape: (top_k, 1)
-
-    # Now all arrays have shape (top_k, 1) and can be concatenated
     tokens = next_token
     validity = jnp.ones_like(next_token, dtype=jnp.bool_)
     lengths = jnp.broadcast_to(
@@ -389,8 +365,7 @@ class EntropixEngine:
       "tokens": next_token,
     }, result
 
-
-  # @functools.partial(jax.jit, static_argnums=(0, 1))
+  @functools.partial(jax.jit, static_argnums=(0, 1))
   def generate(
     self,
     params: Params,
@@ -413,7 +388,6 @@ class EntropixEngine:
     """
     cur_pos = decode_state["next_pos"]
     bsz = decode_state["tokens"].shape[0]
-    bsz = decode_state["tokens"].shape[0]
     freqs_cis_slice = jax.lax.dynamic_slice(
       self.freqs_cis, (cur_pos, 0), (1, self.freqs_cis.shape[1])
     )
@@ -426,19 +400,6 @@ class EntropixEngine:
         freqs_cis_slice,
         decode_state["cache"],
       )
-    with self.mesh:
-      logits, kvcache, _ = self.xfmr_fn(
-        self.xfmr_weights,
-        params,
-        decode_state["tokens"],
-        cur_pos,
-        freqs_cis_slice,
-        decode_state["cache"],
-      )
-    #new_token, metrics = jax.vmap(lambda logit, score: self.sample_fn(logit[None, :], score[None, :]), in_axes=(0, 0))(logits, scores)
-    #new_state, new_token, *_ = jax.vmap(lambda logit: self.sample_fn(rng, decode_state["dslider_state"], logit[None, -1], DEFAULT_DS_CONFIG), in_axes=(0))(logits)
-    new_state, new_token, *_ = self.sample_fn(rng, decode_state["dslider_state"], logits[:, -1, :], DEFAULT_DS_CONFIG)
-    new_token = new_token.reshape((bsz, 1))
 
     # TODO(xjdr): reduce slop tokens by penalizing slop weights
     # logits = logits.at[:, -1, self.slop_tokens].multiply(self.slop_weights[None, :, None])
@@ -456,9 +417,6 @@ class EntropixEngine:
           jnp.full(
             (bsz, 1), decode_state["generated_tokens"][:, -1] + 1, dtype=jnp.int32
           ),
-          jnp.full(
-            (bsz, 1), decode_state["generated_tokens"][:, -1] + 1, dtype=jnp.int32
-          ),
         ),
         axis=1,
       ),
@@ -472,6 +430,7 @@ class EntropixEngine:
       length_idx=(2, 3),
       samples_per_slot=bsz,
     )
+
     return {
       "logits": logits,
       "cache": kvcache,
@@ -479,18 +438,16 @@ class EntropixEngine:
       "generated_tokens": decode_state["generated_tokens"] + 1,
       "tokens": new_token,
       "dslider_state": new_state,
-      "dslider_state": new_state,
     }, result
 
-
-  # @functools.partial(
-  #   jax.jit,
-  #   static_argnums=(0,),
-  #   donate_argnums=(
-  #     1,
-  #     2,
-  #   ),
-  # )
+  @functools.partial(
+    jax.jit,
+    static_argnums=(0,),
+    donate_argnums=(
+      1,
+      2,
+    ),
+  )
   def insert(
     self,
     prefix: Prefix,
