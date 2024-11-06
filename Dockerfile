@@ -26,6 +26,7 @@ COPY entropix/ entropix/
 
 # Set default environment variables that can be overridden
 ENV XLA_PYTHON_CLIENT_PREALLOCATE=false \
+    XLA_FLAGS=--xla_gpu_enable_command_buffer= \
     API_KEYS='sk-test-key' \
     ALLOWED_ORIGINS='*' \
     PYTHONPATH=. \
