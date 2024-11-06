@@ -365,7 +365,7 @@ class EntropixEngine:
       "tokens": next_token,
     }, result
 
-  @functools.partial(jax.jit, static_argnums=(0, 1))
+  # @functools.partial(jax.jit, static_argnums=(0, 1))
   def generate(
     self,
     params: Params,
