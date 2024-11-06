@@ -161,7 +161,6 @@ def adaptive_dirichlet_step(
   update emwa logp (on dirichlet support)
   """
   logprobs_on_supp = normalize_logits(tuned_logprobs[:, config.dirichlet_support], config.noise_floor)
-  print(f"logprobs_on_supp shape: {logprobs_on_supp.shape}")
   kl = jnp.sum(jnp.exp(logprobs_on_supp) * (logprobs_on_supp - state.emwa_logp_on_supp), axis=-1)
   emwa_logp_coeff = config.emwa_logp_base ** (-config.emwa_logp_exp_factor / (kl + EPS))
   new_emwa_logp_on_supp = update_emwa(logprobs_on_supp, state.emwa_logp_on_supp, emwa_logp_coeff[...,None])

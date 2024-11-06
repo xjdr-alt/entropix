@@ -299,7 +299,7 @@ class EntropixEngine:
       mask = jnp.hstack([jnp.zeros((seqlen, start_pos)), mask], dtype=jnp.float32)
     return mask
 
-  @functools.partial(jax.jit, static_argnames=("self", "params"))
+  # @functools.partial(jax.jit, static_argnames=("self", "params"))
   def prefill(
     self,
     *,
@@ -309,7 +309,6 @@ class EntropixEngine:
     true_length: int,
     sampler: Optional[Callable[[Any], Any]] = None,  # pylint: disable=unused-argument
     rng: Optional[jax.random.PRNGKey] = None,
-    top_k: int = 6,
     top_k: int = 6,
   ) -> Tuple[Prefix, ResultTokens]:
     """Computes a kv-cache for a set of tokens conditional on existing cache.
@@ -398,7 +397,6 @@ class EntropixEngine:
     decode_state: DecodeState,
     sampler: Optional[Callable[[Any], Any]] = None,  # pylint: disable=unused-argument
     rng: Optional[jax.random.PRNGKey] = jax.random.PRNGKey(1337),
-    rng: Optional[jax.random.PRNGKey] = jax.random.PRNGKey(1337),
   ) -> Tuple[DecodeState, ResultTokens]:
     """Generates tokens for each sequence being decoded in parallel.
 
@@ -473,9 +471,7 @@ class EntropixEngine:
       # And lengths is rank 1.
       length_idx=(2, 3),
       samples_per_slot=bsz,
-      samples_per_slot=bsz,
     )
-    print(f"new_token: {new_token}")
     return {
       "logits": logits,
       "cache": kvcache,

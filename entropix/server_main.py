@@ -16,7 +16,6 @@ from entropix.config import MODEL_CONFIGS, create_model_params
 from entropix.dslider import adaptive_dirichlet_step
 from entropix.engine import EntropixEngine
 from entropix.model import xfmr
-from entropix.dslider import adaptive_dirichlet_step
 from entropix.orchestrator import Driver, EntropixOrchestrator
 from entropix.prompts import generate_chat_prompt
 from entropix.tokenizer import Tokenizer
@@ -155,14 +154,14 @@ app.add_middleware(
 
 
 async def stream_response(request: ChatCompletionRequest) -> AsyncGenerator[str, None]:
-    request_id = f"chatcmpl-{uuid.uuid4()}"
-    created = int(time.time())
+  request_id = f"chatcmpl-{uuid.uuid4()}"
+  created = int(time.time())
 
   # Send the initial response with role only
   yield f"data: {json.dumps({'id': request_id, 'object': 'chat.completion.chunk', 'created': created, 'model': request.model, 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
 
-    prompt = generate_chat_prompt(request)
-    accumulated_text = ""
+  prompt = generate_chat_prompt(request)
+  accumulated_text = ""
 
   try:
     async for token_batch in model_manager.generate_response(
@@ -197,9 +196,9 @@ async def stream_response(request: ChatCompletionRequest) -> AsyncGenerator[str,
     yield f"data: {json.dumps(final_chunk)}\n\n"
     yield "data: [DONE]\n\n"
 
-    except Exception as e:
-        logger.error(f"Error generating response: {e!s}")
-        raise HTTPException(status_code=500, detail=str(e))
+  except Exception as e:
+    logger.error(f"Error generating response: {e!s}")
+    raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/v1/chat/completions")
