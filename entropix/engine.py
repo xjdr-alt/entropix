@@ -2,6 +2,7 @@ import functools
 import math
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
+from entropix.dslider_tuning import OnlineTuner
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -404,9 +405,19 @@ class EntropixEngine:
     # TODO(xjdr): reduce slop tokens by penalizing slop weights
     # logits = logits.at[:, -1, self.slop_tokens].multiply(self.slop_weights[None, :, None])
     # new_token, metrics = jax.vmap(lambda logit, score: self.sample_fn(logit[None, :], score[None, :]), in_axes=(0, 0))(logits, scores)
+    # new_state, new_token, *_ = self.sample_fn(
+    #   rng, decode_state["dslider_state"], logits[:, -1, :], DEFAULT_DS_CONFIG
+    # )
+
+    tuner = OnlineTuner(DEFAULT_DS_CONFIG, R=2.0)
     new_state, new_token, *_ = self.sample_fn(
-      rng, decode_state["dslider_state"], logits[:, -1, :], DEFAULT_DS_CONFIG
+      rng, decode_state["dslider_state"], logits[:, -1, :], config=DEFAULT_DS_CONFIG, tuner=tuner
     )
+
+    # At the end of your session, print tuning summary
+    print(decode_state["tuner"].get_summary())
+    jax.debug.print("{}", decode_state["tuner"].get_summary())
+
     new_token = new_token.reshape((bsz, 1))
 
     result = ResultTokens(

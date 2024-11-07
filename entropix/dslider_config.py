@@ -243,6 +243,8 @@ register_pytree_node_class(ArgmaxThreshold)
 register_pytree_node_class(DirichletThreshold)
 register_pytree_node_class(TargetEntropy)
 
+# the outlier threshold, the params for the dirichlet update and the params for the perturbation coefficient
+
 DEFAULT_DS_CONFIG = DSConfig(
   emwa_logp_base=4.0,
   emwa_logp_exp_factor=3.0,
