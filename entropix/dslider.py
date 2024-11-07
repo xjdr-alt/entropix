@@ -1,6 +1,7 @@
 from functools import partial
-from typing import NamedTuple, Tuple
+from typing import NamedTuple, Optional, Tuple
 
+from entropix.dslider_tuning import OnlineTuner
 import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
@@ -97,12 +98,13 @@ def initialize_state(
   return state
 
 
-@partial(jax.jit, static_argnames=("config", "wild"))
+@partial(jax.jit, static_argnames=("config", "tuner", "wild"))
 def adaptive_dirichlet_step(
   key: jax.random.PRNGKey,
   state: DSState,
   logits: jnp.ndarray,
   config: DSConfig,
+  tuner: Optional[OnlineTuner] = None,
   wild: bool = True,
 ) -> Tuple[DSState, jnp.ndarray]:
   dtype = logits.dtype
@@ -263,6 +265,13 @@ def adaptive_dirichlet_step(
   ) = update_token_cross_entropies(
     state, scaffold_token_logprob, naked_token_logprob, config
   )
+  if tuner:
+    config = tuner.update(
+        jnp.log(interpolated_probs + EPS),
+        naked_log_probs,
+        new_token_cross_ent_naked,
+        new_token_cross_ent_scaffold
+    )
   # assemble new state
   new_state = DSState(
     emwa_dir=new_emwa_dir,
@@ -279,6 +288,12 @@ def adaptive_dirichlet_step(
     emwa_dir_ent=new_emwa_dir_ent,
     emwa_topk_ent_naked=new_emwa_topk_ent_naked,
   )
+
+  if tuner:
+    tuner.idx += 1
+    if tuner.idx < tuner.max_idx:
+      return adaptive_dirichlet_step(key, new_state, logits, config, tuner, wild)
+
   return (
     new_state,
     output_tokens,
