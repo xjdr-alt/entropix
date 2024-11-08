@@ -403,9 +403,8 @@ class EntropixEngine:
 
     # TODO(xjdr): reduce slop tokens by penalizing slop weights
     # logits = logits.at[:, -1, self.slop_tokens].multiply(self.slop_weights[None, :, None])
-    # new_token, metrics = jax.vmap(lambda logit, score: self.sample_fn(logit[None, :], score[None, :]), in_axes=(0, 0))(logits, scores)
-    new_state, new_token, *_ = self.sample_fn(
-      rng, decode_state["dslider_state"], logits[:, -1, :], DEFAULT_DS_CONFIG
+    new_token, new_state = self.sample_fn(
+      decode_state["dslider_state"], logits[:, -1, :], DEFAULT_DS_CONFIG, key=rng
     )
     new_token = new_token.reshape((bsz, 1))
 
