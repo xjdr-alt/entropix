@@ -14,11 +14,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from entropix.config import MODEL_CONFIGS, create_model_params
-from entropix.dslider import adaptive_dirichlet_step
 from entropix.engine import EntropixEngine
 from entropix.model import xfmr
 from entropix.orchestrator import Driver, EntropixOrchestrator
 from entropix.prompts import generate_chat_prompt
+from entropix.sampler import sample
 from entropix.tokenizer import Tokenizer
 from entropix.weights import load_weights
 
@@ -98,7 +98,7 @@ class ModelManager:
         xfmr_weights, mesh = load_weights(ckpt_path, model_params)
         self._tokenizer = Tokenizer(tokenizer_path)
         xfmr_fn = jax.jit(xfmr, static_argnames=("model_params",))
-        sample_fn = jax.jit(adaptive_dirichlet_step)
+        sample_fn = jax.jit(sample)
 
         # Use all available devices
         num_engines = jax.device_count()
@@ -272,7 +272,9 @@ async def create_chat_completion(request: ChatCompletionRequest):
   if request.stream:
     return StreamingResponse(stream_response(request), media_type="text/event-stream")
   else:
-    return await non_streaming_response(request)
+    # Return a regular JSON response for non-streaming requests
+    response = await non_streaming_response(request)
+    return response  # FastAPI will automatically convert this to a JSON response
 
 
 @app.get("/health")

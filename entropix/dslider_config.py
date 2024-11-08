@@ -271,10 +271,10 @@ DEFAULT_DS_CONFIG = DSConfig(
     linear_naked_varent=1.2,
     bias=0.0,
   ),
-  argmax_threshold=ArgmaxThreshold(weight=1.0, bias=5.0),
-  dirichlet_threshold=DirichletThreshold(weight=1.0, bias=5.0),
+  argmax_threshold=ArgmaxThreshold(weight=0.1, bias=1.2),
+  dirichlet_threshold=DirichletThreshold(weight=0.1, bias=1.2),
   target_entropy=TargetEntropy(
     linear=jnp.array([1.0, 1.0, 1.0, 1.0]), linear_inv_temp=jnp.ones(1) * 8.0, bias=0.0
   ),
-  outlier_topk=3,
+  outlier_topk=6,
 )
