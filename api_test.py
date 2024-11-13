@@ -56,23 +56,35 @@ def test_streaming():
 
 def test_non_streaming():
   print("\nTesting non-streaming response:")
-  completion = client.chat.completions.create(
-    model="entropix-1b",
-    messages=[
-      {
-        "role": "system",
-        "content": "You are a world class problem solver. You always think step-by-step and come to the proper solutions.",
-      },
-      {
-        "role": "user",
-        "content": "Think carefully in a step-by-step manner. which number is larger, 9.9 or 9.11?",
-      },
-    ],
-    stream=False,
-  )
-  for idx, choice in enumerate(completion.choices):
-    print(f"Choice {idx}: {choice.message.content}")
-  return completion.choices[0].message.content
+  try:
+    completion = client.chat.completions.create(
+      model="entropix-1b",
+      messages=[
+        {
+          "role": "system",
+          "content": "You are a world class problem solver. You always think step-by-step and come to the proper solutions.",
+        },
+        {
+          "role": "user",
+          "content": "Think carefully in a step-by-step manner. how many R's are in the word 'strawberry'?",
+        },
+      ],
+      stream=False,
+    )
+
+    # Add response validation
+    if not hasattr(completion, 'choices') or not completion.choices:
+      raise ValueError("Invalid response format: missing choices")
+
+    for idx, choice in enumerate(completion.choices):
+      if not hasattr(choice, 'message') or not hasattr(choice.message, 'content'):
+        raise ValueError(f"Invalid choice format in response: {choice}")
+      print(f"Choice {idx}: {choice.message.content}")
+
+    return completion.choices[0].message.content
+  except Exception as e:
+    print(f"Non-streaming test failed: {str(e)}")
+    raise
 
 
 def main():
@@ -80,11 +92,11 @@ def main():
 
   try:
     # Test non-streaming
-    #non_streaming_response = test_non_streaming()
-    #print(f"\nNon-streaming response length: {len(non_streaming_response)}")
+    non_streaming_response = test_non_streaming()
+    print(f"\nNon-streaming response length: {len(non_streaming_response)}")
 
     # Add a small delay between tests
-    #time.sleep(5)
+    time.sleep(1)
 
     # Test streaming
     streaming_response = test_streaming()

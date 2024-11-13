@@ -65,9 +65,9 @@ def create_partition_spec(key):
   mp = "mp"
   fsdp = "fsdp"
   if "norm" in key:
-    return PS()
+    return PS(None)
   if "rope.freqs" in key:
-    return PS()
+    return PS(None)
   elif "tok_embeddings" in key or "output" in key or "w2" in key:
     return PS(fsdp, mp)
   else:
@@ -466,20 +466,31 @@ class EntropixEngine:
     a [0, n) range of slots and converted internally.
     """
     bsz = prefix["tokens"].shape[0]
-    layers, _, max_seq_len, kv_heads, head_dim = prefix["cache"].k.shape
-    new_k = jnp.broadcast_to(
-      prefix["cache"].k, (layers, bsz, max_seq_len, kv_heads, head_dim)
-    )
-    new_v = jnp.broadcast_to(
-      prefix["cache"].v, (layers, bsz, max_seq_len, kv_heads, head_dim)
-    )
-    new_cache = KVCache(k=new_k, v=new_v)
+    state = initialize_state(prefix["logits"], bsz, DEFAULT_DS_CONFIG)
+    if bsz > 1:
+      layers, _, max_seq_len, kv_heads, head_dim = prefix["cache"].k.shape
+      new_k = jnp.broadcast_to(
+        prefix["cache"].k, (layers, bsz, max_seq_len, kv_heads, head_dim)
+      )
+      new_v = jnp.broadcast_to(
+        prefix["cache"].v, (layers, bsz, max_seq_len, kv_heads, head_dim)
+      )
+      new_cache = KVCache(k=new_k, v=new_v)
 
-    return {
-      "logits": prefix["logits"],
-      "cache": new_cache,
-      "next_pos": prefix["next_pos"],
-      "generated_tokens": prefix["generated_tokens"],
-      "tokens": prefix["tokens"],
-      "dslider_state": initialize_state(prefix["logits"], bsz, DEFAULT_DS_CONFIG),
-    }
+      return {
+        "logits": prefix["logits"],
+        "cache": new_cache,
+        "next_pos": prefix["next_pos"],
+        "generated_tokens": prefix["generated_tokens"],
+        "tokens": prefix["tokens"],
+        "dslider_state": state,
+      }
+    else:
+      return {
+        "logits": prefix["logits"],
+        "cache": prefix["cache"],
+        "next_pos": prefix["next_pos"],
+        "generated_tokens": prefix["generated_tokens"],
+        "tokens": prefix["tokens"],
+        "dslider_state": state,
+      }

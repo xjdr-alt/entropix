@@ -202,15 +202,35 @@ def aggregate_results(
   )
 
 
-def map_with_progress(f: callable, xs: list[Any], num_threads: int = 50):
-  """
-  Apply f to each element of xs, using a ThreadPool, and show progress.
-  """
-  if os.getenv("debug"):
-    return list(map(f, tqdm(xs, total=len(xs))))
-  else:
-    with ThreadPool(min(num_threads, len(xs))) as pool:
-      return list(tqdm(pool.imap(f, xs), total=len(xs)))
+def map_with_progress(
+    f: callable,
+    xs: list[Any],
+    num_threads: int = 50,
+    sequential: bool = True,
+    delay: float = 1.0  # Add delay between requests when running sequentially
+):
+    """
+    Apply f to each element of xs, showing progress.
+
+    Args:
+        f: Function to apply
+        xs: List of items to process
+        num_threads: Number of threads to use when parallel
+        sequential: If True, process items sequentially with delay
+        delay: Time to wait between requests when sequential
+    """
+    if os.getenv("debug") or sequential:
+        if sequential:
+            import time
+            results = []
+            for x in tqdm(xs, total=len(xs)):
+                results.append(f(x))
+                time.sleep(delay)  # Add delay between requests
+            return results
+        return list(map(f, tqdm(xs, total=len(xs))))
+    else:
+        with ThreadPool(min(num_threads, len(xs))) as pool:
+            return list(tqdm(pool.imap(f, xs), total=len(xs)))
 
 
 jinja_env = jinja2.Environment(

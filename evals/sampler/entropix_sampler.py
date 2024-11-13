@@ -29,7 +29,7 @@ class EntropixSampler(SamplerBase):
     api_key: str = "sk-test-key",
   ):
     self.api_key_name = "OPENAI_API_KEY"
-    self.client = OpenAI(base_url=base_url, api_key=api_key)
+    self.client = OpenAI(base_url=base_url, api_key=api_key, timeout=300.0)
     self.model = model
     self.system_message = system_message
     self.temperature = temperature
@@ -64,6 +64,7 @@ class EntropixSampler(SamplerBase):
           messages=message_list,
           temperature=self.temperature,
           max_tokens=self.max_tokens,
+          stream=False,
         )
         return response.choices[0].message.content
       # NOTE: BadRequestError is triggered once for MMMU, please uncomment if you are reruning MMMU

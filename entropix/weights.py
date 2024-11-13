@@ -53,9 +53,11 @@ def create_partition_spec(key):
   mp = "mp"
   fsdp = "fsdp"
   if "norm" in key:
-    return PS()
+    return PS(None)
+  if "bias" in key:
+    return PS(None)
   if "rope.freqs" in key:
-    return PS()
+    return PS(None)
   elif "tok_embeddings" in key:
     return PS(fsdp, mp)
   elif "output" in key:

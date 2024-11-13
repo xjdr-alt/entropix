@@ -36,6 +36,16 @@ services:
       - entropix-network
     ports:
       - "8000:8000"
+    develop:
+      watch:
+        - action: sync
+          path: ./entropix
+          target: /app/entropix
+          ignore:
+            - __pycache__/
+        - action: sync+restart
+          path: ./entropix
+          target: /app/entropix
 
   glances:
     image: nicolargo/glances:latest

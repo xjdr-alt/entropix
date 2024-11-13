@@ -101,7 +101,7 @@ class ModelManager:
         sample_fn = jax.jit(sample)
 
         # Use all available devices
-        num_engines = jax.device_count()
+        num_engines = 8  # jax.device_count()
         logger.info(f"Initializing with {num_engines} devices")
 
         driver = Driver(
