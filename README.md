@@ -86,6 +86,36 @@ run it (torch)
  PYTHONPATH=. poetry run python entropix/torch_main.py
 ```
 
+## Docker Setup
+
+Note: currently we only have Docker support for CUDA and CPU.
+
+To build and run the project using Docker, follow these steps:
+
+1. Ensure you have Docker installed on your system, and export your Hugging Face token as an environment variable:
+   ```bash
+   export HF_TOKEN=your_huggingface_token
+   ```
+
+2. Build the Docker image using the following command:
+   ```bash
+  DOCKER_BUILDKIT=1 docker build \
+    --secret id=ssh_key,src=$HOME/.ssh/your_ssh_key \
+    --secret id=known_hosts,src=$HOME/.ssh/known_hosts \
+    --secret id=hf_token,env=HF_TOKEN \
+    --build-arg BACKEND=cuda \
+    -t entropix \
+    -f docker/Dockerfile.entropix .   
+    ```
+   Make sure to replace `your_ssh_key` with the path to your actual SSH key, and to set the `BACKEND` argument to `cpu` if you want to build the CPU image.
+
+3. Once the image is built, you can run it using:
+   ```bash
+   docker run -it entropix
+   ```
+
+4. Inside the Docker container, you'll need to download the weights and tokenizer model and run the model. Refer to the steps above.
+
 
 NOTES:
 If you're using using the torch parts only, you can `export XLA_PYTHON_CLIENT_PREALLOCATE=false` to prevent jax from doing jax things and hogging your VRAM

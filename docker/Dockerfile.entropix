@@ -1,0 +1,43 @@
+ARG BACKEND=cuda
+# CUDA base image
+FROM nvidia/cuda:12.3.1-base-ubuntu22.04 AS cuda_base
+# CPU base image
+FROM ubuntu:22.04 AS cpu_base
+
+FROM ${BACKEND}_base AS final
+ARG DEBIAN_FRONTEND=noninteractive
+ARG BACKEND
+
+# Required to disable interactive prompts when installing openssh.
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    software-properties-common \
+    openssh-client \
+    build-essential \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y python3.12 python3.12-venv python3.12-dev \
+    && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12 \
+    && rm -rf /var/lib/apt/lists/*
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
+
+# Instructions from README.md
+RUN curl -sSL https://install.python-poetry.org | python3.12 -
+RUN curl --proto '=https' --tlsv1.3 https://sh.rustup.rs -sSf | sh -s -- -y
+ENV PATH="/root/.local/bin:/root/.cargo/bin:$PATH"
+
+RUN --mount=type=secret,id=ssh_key,mode=0400 \
+    --mount=type=secret,id=known_hosts \
+    mkdir -p /root/.ssh && \
+    cp /run/secrets/known_hosts /root/.ssh/known_hosts && \
+    GIT_SSH_COMMAND='ssh -i /run/secrets/ssh_key' git clone git@github.com:xjdr-alt/entropix.git /app
+WORKDIR /app
+RUN --mount=type=secret,id=hf_token \
+    export HF_TOKEN=$(cat /run/secrets/hf_token) && \
+    poetry env use python3.12 && \
+    poetry install && \
+    poetry run huggingface-cli login --token $HF_TOKEN
+
+ENTRYPOINT ["/bin/bash"]
