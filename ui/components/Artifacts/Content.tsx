@@ -29,8 +29,8 @@ export default function ArtifactContent({
       return <HtmlPreview content={activeArtifactData.content} language={activeArtifactData.language || ''} />;
     }
 
-    if (showLogs) {
-      return activeArtifactData && <Logs entries={logEntries[activeArtifactData.id] || []} />;
+    if (showLogs && activeArtifactData) {
+      return <Logs entries={logEntries[activeArtifactData.id] || []} />;
     }
 
     return activeArtifact && renderArtifact(artifacts.find(a => a.id === activeArtifact)!);
