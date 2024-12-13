@@ -108,7 +108,7 @@ def main(model_id: str, out_dir: Path):
                 #param = reverse_permute(param, n_heads=8, dim1=1024, dim2=6144)    # Mixtral8x22B
             else:
                 pass
-            bf16_np_out = param.cpu().view(dtype=torch.uint16).numpy().view(ml_dtypes.bfloat16)
+            bf16_np_out = param.bfloat16().cpu().view(dtype=torch.uint16).numpy().view(ml_dtypes.bfloat16)
             bf16_out = jnp.asarray(bf16_np_out, dtype=jnp.bfloat16).reshape(*param.shape)
             print(f'Writing {hf_name} as {name} to {out_dir}/{name}.npy')
             jnp.save(f'{out_dir}/{name}.npy', bf16_out)
