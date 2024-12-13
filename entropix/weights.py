@@ -90,7 +90,10 @@ def load_weights(
           model_params.head_dim,
         )
     # print(name, weight.shape, sharding._to_xla_hlo_sharding(weight.ndim))
-    w[name] = jax.device_put(weight, sharding)
+    if weight.ndim == 1:
+        w[name] = jax.device_put_replicated(weight, jax.devices())
+    else:
+        w[name] = jax.device_put(weight, sharding)
 
   for i in range(model_params.n_layers):
     layer_weights.append(
