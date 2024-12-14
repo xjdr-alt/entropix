@@ -79,7 +79,7 @@ def load_weights(
   for file in ckpt_dir.glob("*.npy"):
     name = ".".join(str(file).split("/")[-1].split(".")[:-1])
     weight = jnp.load(file=file, mmap_mode="r", allow_pickle=True)
-    partition_spec = create_partition_spec(name)
+    partition_spec = jax.sharding.PartitionSpec() if weight.ndim == 0 else create_partition_spec(name)
     sharding = NamedSharding(mesh, partition_spec)
     if any(lyr in name for lyr in ["wq", "wk", "wv", "wo", "w1", "w2", "w3"]):
       weight = weight.T
@@ -90,10 +90,7 @@ def load_weights(
           model_params.head_dim,
         )
     # print(name, weight.shape, sharding._to_xla_hlo_sharding(weight.ndim))
-    if weight.ndim == 0:
-        weight = jnp.stack([weight] * jax.device_count())
     w[name] = jax.device_put(weight, sharding)
-
 
   for i in range(model_params.n_layers):
     layer_weights.append(
