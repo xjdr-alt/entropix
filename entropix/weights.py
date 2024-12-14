@@ -92,8 +92,6 @@ def load_weights(
     # print(name, weight.shape, sharding._to_xla_hlo_sharding(weight.ndim))
     if weight.ndim == 0:
         weight = jnp.stack([weight] * jax.device_count())
-    elif weight.ndim == 1:
-        weight = jnp.concatenate([weight] * jax.device_count())
     w[name] = jax.device_put(weight, sharding)
 
 
